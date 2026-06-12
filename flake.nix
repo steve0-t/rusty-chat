@@ -21,6 +21,9 @@
         rustc
         rustup
         rustfmt
+        openssl
+        pkg-config
+        websocat
       ];
     };
   };
