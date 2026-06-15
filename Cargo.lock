@@ -122,9 +122,10 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 [[package]]
 name = "chat_app"
 version = "0.1.0"
-dependencies = [
- "websocket",
-]
+
+[[package]]
+name = "client"
+version = "0.1.0"
 
 [[package]]
 name = "cloudabi"
@@ -913,6 +914,13 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "server"
+version = "0.1.0"
+dependencies = [
+ "websocket",
 ]
 
 [[package]]

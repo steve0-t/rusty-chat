@@ -3,5 +3,22 @@ name = "chat_app"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-websocket = { version = "0.27.1", features = ["async", "async-ssl", "bytes", "futures", "native-tls", "sync", "sync-ssl"] }
+# Source - https://stackoverflow.com/a/57630418
+# Posted by user1829232, modified by community. See post 'Timeline' for change history
+# Retrieved 2026-06-15, License - CC BY-SA 4.0
+
+[workspace]
+resolver = "2"
+members = ["server", "client"]
+
+# Source - https://stackoverflow.com/a/36604610
+# Posted by Dogbert, modified by community. See post 'Timeline' for change history
+# Retrieved 2026-06-15, License - CC BY-SA 4.0
+
+# [[bin]]
+# name = "server"
+# path = "server/src/main.rs"
+
+# [[bin]]
+# name = "client"
+# path = "client/src/main.rs"
