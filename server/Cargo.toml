@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 websocket = { version = "0.27.1", features = ["async", "async-ssl", "bytes", "futures", "native-tls", "sync", "sync-ssl"] }
+surrealdb = "3.1.5"
