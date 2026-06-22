@@ -24,6 +24,7 @@
         openssl
         pkg-config
         websocat
+        surrealdb
       ];
     };
   };
