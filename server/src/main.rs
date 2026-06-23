@@ -1,15 +1,18 @@
 use std::{
     error::Error,
     fs::File,
-    io::Read,
+    io::{self, Read},
     net::{TcpListener, TcpStream},
     ops::Sub,
+    process::Command,
     rc::Rc,
     thread,
 };
 
+use surrealdb::{Surreal, opt::EndpointKind::SurrealKv};
 use websocket::{
     Message,
+    header::CacheDirective::Private,
     native_tls::{Identity, TlsAcceptor, TlsStream},
     server::{WsServer, upgrade::WsUpgrade},
     sync::{Server, server::upgrade::Buffer},
@@ -18,6 +21,19 @@ use websocket::{
 enum CommandType {
     CreateChannel = 2,
     Quit = 1,
+}
+
+impl TryFrom<u32> for CommandType {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            x if x == CommandType::Quit as u32 => Ok(CommandType::Quit),
+            x if x == CommandType::CreateChannel as u32 => Ok(CommandType::CreateChannel),
+            // x if x == CommandType::C as i32 => Ok(CommandType::C),
+            _ => Err(()),
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -94,16 +110,40 @@ fn handle_client(stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>) {
         match client.recv_message() {
             Ok(msg) => match msg {
                 websocket::OwnedMessage::Text(text) => {
-                    let op: Result<i32, _> = text.parse();
+                    let op = text.trim().parse::<u32>();
                     match op {
                         Ok(op) => {
-                            // let cmd = CommandType::from(op);
+                            // println!("{op}");
+                            let cmd = CommandType::try_from(op);
+                            match cmd {
+                                Ok(CommandType::CreateChannel) => {
+                                    print!("Name of channel: ");
+                                    let mut buf = String::new();
+                                    let res = io::stdin().read_line(&mut buf);
+                                    match res {
+                                        Ok(n) => {
+                                            todo!();
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to get new channel name: {e}");
+                                        }
+                                    }
+                                }
+                                Ok(CommandType::Quit) => {
+                                    let message = Message::text("Bye client from server!");
+                                    let _ = client.send_message(&message);
+                                    let _ = client.shutdown();
+                                }
+                                Err(e) => {
+                                    eprintln!("Unknown command: {e:?}");
+                                }
+                            }
                         }
                         Err(e) => {
                             eprintln!("Encountered error when parsing operation request: {e}");
                         }
                     }
-                    // println!("Received from client: {text}");
+                    println!("Received from client: {:?}", text);
                 }
                 websocket::OwnedMessage::Binary(_items) => todo!(),
                 websocket::OwnedMessage::Close(close_data) => {
