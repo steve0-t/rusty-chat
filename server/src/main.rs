@@ -4,23 +4,41 @@ use std::{
     io::{self, Read},
     net::{TcpListener, TcpStream},
     ops::Sub,
-    process::Command,
+    process::{Command, exit},
     rc::Rc,
     thread,
 };
 
-use surrealdb::{Surreal, opt::EndpointKind::SurrealKv};
+use surrealdb::{
+    Surreal,
+    engine::remote::ws::{Client, Ws},
+    opt::EndpointKind::SurrealKv,
+    types::{Datetime, Uuid},
+};
+
 use websocket::{
     Message,
-    header::CacheDirective::Private,
+    header::{CacheDirective::Private, RelationType::SuccessorVersion},
     native_tls::{Identity, TlsAcceptor, TlsStream},
     server::{WsServer, upgrade::WsUpgrade},
     sync::{Server, server::upgrade::Buffer},
 };
 
+use surrealdb_types::{RecordId, SurrealValue, Value};
+
+use anyhow::Result;
+
 enum CommandType {
     CreateChannel = 2,
     Quit = 1,
+}
+
+#[derive(Debug, SurrealValue)]
+struct Channel {
+    channel_name: String,
+    owner: RecordId,
+    members: Vec<RecordId>,
+    created_at: Datetime,
 }
 
 impl TryFrom<u32> for CommandType {
@@ -36,7 +54,8 @@ impl TryFrom<u32> for CommandType {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let mut cert_file = match File::open("cert.pem") {
         Ok(res) => res,
         Err(e) => {
@@ -72,6 +91,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build()
         .expect("Failed to create TLS acceptor");
 
+    let db = Surreal::new::<Ws>("ws://127.0.0.1:8000").await?;
+    db.use_ns("main").use_db("main").await?;
+
     let mut server = match Server::bind_secure("127.0.0.1:9090", tls_acceptor) {
         Ok(res) => res,
         Err(e) => {
@@ -80,17 +102,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    deploy_server(&mut server);
-
-    Ok(())
+    match deploy_server(&mut server, &db).await {
+        Ok(()) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
-fn deploy_server(server: &mut WsServer<TlsAcceptor, TcpListener>) {
+async fn deploy_server(
+    server: &mut WsServer<TlsAcceptor, TcpListener>,
+    db: &Surreal<Client>,
+) -> Result<()> {
     while let Some(conn) = server.next() {
         match conn {
             Ok(stream) => {
-                thread::spawn(move || {
-                    handle_client(stream);
+                let db = db.clone();
+                tokio::spawn(async move {
+                    handle_client(stream, &db).await;
                 });
             }
 
@@ -99,9 +126,13 @@ fn deploy_server(server: &mut WsServer<TlsAcceptor, TcpListener>) {
             }
         }
     }
+    Ok(())
 }
 
-fn handle_client(stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>) {
+async fn handle_client(
+    stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>,
+    db: &Surreal<Client>,
+) {
     let mut client = stream.accept().unwrap();
     let message = Message::text("Server sent: Hello, client!");
     let _ = client.send_message(&message);
@@ -117,17 +148,7 @@ fn handle_client(stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>) {
                             let cmd = CommandType::try_from(op);
                             match cmd {
                                 Ok(CommandType::CreateChannel) => {
-                                    print!("Name of channel: ");
-                                    let mut buf = String::new();
-                                    let res = io::stdin().read_line(&mut buf);
-                                    match res {
-                                        Ok(n) => {
-                                            todo!();
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to get new channel name: {e}");
-                                        }
-                                    }
+                                    // create_channel(&db).await;
                                 }
                                 Ok(CommandType::Quit) => {
                                     let message = Message::text("Bye client from server!");
@@ -171,3 +192,22 @@ fn handle_client(stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>) {
         }
     }
 }
+
+// async fn create_channel(db: &Surreal<Client>) {
+//     print!("Name of channel: ");
+//     let mut buf = String::new();
+//     let res = io::stdin().read_line(&mut buf);
+//     match res {
+//         Ok(n) => {
+//             db.create("channel").content(Channel {
+//                 channel_name: buf,
+//                 owner: None,
+//                 members: None,
+//                 created_at: Datetime::now(),
+//             });
+//         }
+//         Err(e) => {
+//             eprintln!("Failed to get new channel name: {e}");
+//         }
+//     }
+// }
