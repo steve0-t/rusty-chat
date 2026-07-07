@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+websocket = { version = "0.27.1", features = ["async", "async-ssl", "bytes", "futures", "native-tls", "sync", "sync-ssl"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+anyhow = { version = "1.0.103", features = ["backtrace"] }
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-rustls = "0.26.4"
