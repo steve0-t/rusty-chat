@@ -1,3 +1,3 @@
 #!/bin/sh
 
-websocat -k wss://127.0.0.1:9090
+cargo build --workspace && ./target/debug/client
