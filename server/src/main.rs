@@ -7,15 +7,20 @@ use std::{
     process::{Command, exit},
     rc::Rc,
     thread,
+    time::Duration,
 };
 
 use surrealdb::{
     Surreal,
-    engine::remote::ws::{Client, Ws},
+    engine::{
+        any::Any,
+        remote::ws::{Client, Ws},
+    },
     opt::EndpointKind::SurrealKv,
     types::{Datetime, Uuid},
 };
 
+use tokio::time::timeout;
 use websocket::{
     Message,
     header::{CacheDirective::Private, RelationType::SuccessorVersion},
@@ -56,7 +61,7 @@ impl TryFrom<u32> for CommandType {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut cert_file = match File::open("cert.pem") {
+    let mut cert_file = match File::open("rustychat.com+4.pem") {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Could not open certificate file: {e:?}");
@@ -68,7 +73,7 @@ async fn main() -> Result<()> {
 
     cert_file.read_to_end(&mut cert_buf)?;
 
-    let mut cert_key_file = match File::open("key.pem") {
+    let mut cert_key_file = match File::open("rustychat.com+4-key.pem") {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Could not open certificate key file: {e:?}");
@@ -91,16 +96,24 @@ async fn main() -> Result<()> {
         .build()
         .expect("Failed to create TLS acceptor");
 
-    let db = Surreal::new::<Ws>("ws://127.0.0.1:8000").await?;
-    db.use_ns("main").use_db("main").await?;
-
-    let mut server = match Server::bind_secure("127.0.0.1:9090", tls_acceptor) {
-        Ok(res) => res,
+    let addr = "127.0.0.1:9090".to_string();
+    let mut server = match Server::bind_secure(&addr, tls_acceptor) {
+        Ok(server) => {
+            println!("Server: Ready! Listening on {addr}");
+            server
+        }
         Err(e) => {
             eprintln!("Failed to bind server: {e:?}");
             return Err(e.into());
         }
     };
+
+    let db = timeout(
+        Duration::from_secs(5),
+        surrealdb::engine::any::connect("ws://localhost:8000"),
+    )
+    .await??;
+    db.use_ns("main").use_db("main").await?;
 
     match deploy_server(&mut server, &db).await {
         Ok(()) => Ok(()),
@@ -110,14 +123,20 @@ async fn main() -> Result<()> {
 
 async fn deploy_server(
     server: &mut WsServer<TlsAcceptor, TcpListener>,
-    db: &Surreal<Client>,
+    db: &Surreal<Any>,
 ) -> Result<()> {
     while let Some(conn) = server.next() {
         match conn {
             Ok(stream) => {
                 let db = db.clone();
+                println!("New client connected!");
                 tokio::spawn(async move {
-                    handle_client(stream, &db).await;
+                    match handle_client(stream, &db).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Server: client errored out: {e:?}");
+                        }
+                    }
                 });
             }
 
@@ -131,8 +150,8 @@ async fn deploy_server(
 
 async fn handle_client(
     stream: WsUpgrade<TlsStream<TcpStream>, Option<Buffer>>,
-    db: &Surreal<Client>,
-) {
+    db: &Surreal<Any>,
+) -> Result<()> {
     let mut client = stream.accept().unwrap();
     let message = Message::text("Server sent: Hello, client!");
     let _ = client.send_message(&message);
@@ -144,11 +163,11 @@ async fn handle_client(
                     let op = text.trim().parse::<u32>();
                     match op {
                         Ok(op) => {
-                            // println!("{op}");
+                            println!("{op}");
                             let cmd = CommandType::try_from(op);
                             match cmd {
                                 Ok(CommandType::CreateChannel) => {
-                                    // create_channel(&db).await;
+                                    create_channel(&db, &mut client).await;
                                 }
                                 Ok(CommandType::Quit) => {
                                     let message = Message::text("Bye client from server!");
@@ -174,7 +193,7 @@ async fn handle_client(
                         }
                         None => {}
                     }
-                    return;
+                    return Ok(());
                 }
                 websocket::OwnedMessage::Ping(_items) => todo!(),
                 websocket::OwnedMessage::Pong(_items) => todo!(),
@@ -182,32 +201,44 @@ async fn handle_client(
 
             Err(websocket::WebSocketError::NoDataAvailable) => {
                 println!("Client disconnected");
-                return;
+                return Ok(());
             }
 
             Err(e) => {
                 println!("Received invalid message: {e:?}");
-                return;
+                return Err(e.into());
             }
         }
     }
 }
 
-// async fn create_channel(db: &Surreal<Client>) {
-//     print!("Name of channel: ");
-//     let mut buf = String::new();
-//     let res = io::stdin().read_line(&mut buf);
-//     match res {
-//         Ok(n) => {
-//             db.create("channel").content(Channel {
-//                 channel_name: buf,
-//                 owner: None,
-//                 members: None,
-//                 created_at: Datetime::now(),
-//             });
-//         }
-//         Err(e) => {
-//             eprintln!("Failed to get new channel name: {e}");
-//         }
-//     }
-// }
+async fn create_channel(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) {
+    let _ = client.send_message(&Message::text("Name of channel: "));
+
+    // let mut buf = String::new();
+    match client.recv_message() {
+        Ok(response) => {
+            // db.create("channel").content(Channel {
+            //     channel_name: buf,
+            //     owner: RecordId::new(table, key),
+            //     members: None,
+            //     created_at: Datetime::now(),
+            // });
+            match response {
+                websocket::OwnedMessage::Text(text) => {
+                    println!("Created channel {text}");
+                }
+                websocket::OwnedMessage::Binary(_items) => todo!(),
+                websocket::OwnedMessage::Close(_close_data) => todo!(),
+                websocket::OwnedMessage::Ping(_items) => todo!(),
+                websocket::OwnedMessage::Pong(_items) => todo!(),
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to get new channel name: {e}");
+        }
+    }
+}
