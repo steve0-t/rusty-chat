@@ -7,6 +7,7 @@ edition = "2024"
 websocket = { version = "0.27.1", features = ["async", "async-ssl", "bytes", "futures", "native-tls", "sync", "sync-ssl"] }
 surrealdb = { version = "3.1.5" }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tungstenite = "0.29.0"
 tokio = { version = "1.52.3", features = ["full"] }
 anyhow = { version = "1.0.103", features = ["backtrace"] }
 surrealdb-types = { version = "3.2.0", features = ["convert", "arbitrary", "reqwest"] }
