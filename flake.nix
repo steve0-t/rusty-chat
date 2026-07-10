@@ -1,14 +1,20 @@
 {
-  description = "Flake rust environment";
+  description = "Chat app env";
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "nixpkgs/nixos-unstable";
+
+    surrealdb = {
+      url = "github:surrealdb/surrealdb";
+      flake = true;
+    };
   };
 
   outputs = {
     nixpkgs,
     nixpkgs-unstable,
+    surrealdb,
     ...
   }: let
     system = "x86_64-linux";
@@ -31,10 +37,11 @@
           openssl
           pkg-config
           websocat
+          surrealdb.packages.${system}.default
+          mkcert
         ]
         ++ (with pkgs-unstable; [
           surrealist
-          surrealdb
         ]);
     };
   };
