@@ -22,7 +22,7 @@ use surrealdb::{
 
 use tokio::time::timeout;
 use websocket::{
-    Message,
+    Message, OwnedMessage,
     header::{CacheDirective::Private, RelationType::SuccessorVersion},
     native_tls::{Identity, TlsAcceptor, TlsStream},
     server::{WsServer, upgrade::WsUpgrade},
@@ -34,16 +34,25 @@ use surrealdb_types::{RecordId, SurrealValue, Value};
 use anyhow::Result;
 
 enum CommandType {
-    CreateChannel = 2,
     Quit = 1,
+    CreateChannel = 2,
 }
 
 #[derive(Debug, SurrealValue)]
 struct Channel {
     channel_name: String,
-    owner: RecordId,
+    owner: Option<RecordId>,
     members: Vec<RecordId>,
     created_at: Datetime,
+}
+
+#[derive(Debug, SurrealValue)]
+struct User {
+    username: String,
+    user_id: RecordId,
+    created_at: Datetime,
+    phone_number: Option<u32>,
+    email_addr: Option<String>,
 }
 
 impl TryFrom<u32> for CommandType {
@@ -153,13 +162,16 @@ async fn handle_client(
     db: &Surreal<Any>,
 ) -> Result<()> {
     let mut client = stream.accept().unwrap();
-    let message = Message::text("Server sent: Hello, client!");
-    let _ = client.send_message(&message);
+
+    match auth_client(&db, &mut client).await {
+        Ok(_) => {}
+        Err(_) => todo!(),
+    };
 
     loop {
         match client.recv_message() {
             Ok(msg) => match msg {
-                websocket::OwnedMessage::Text(text) => {
+                OwnedMessage::Text(text) => {
                     let op = text.trim().parse::<u32>();
                     match op {
                         Ok(op) => {
@@ -185,8 +197,8 @@ async fn handle_client(
                     }
                     println!("Received from client: {:?}", text);
                 }
-                websocket::OwnedMessage::Binary(_items) => todo!(),
-                websocket::OwnedMessage::Close(close_data) => {
+                OwnedMessage::Binary(_items) => todo!(),
+                OwnedMessage::Close(close_data) => {
                     match close_data {
                         Some(close_data) => {
                             println!("Client closed with: {close_data:?}");
@@ -195,8 +207,8 @@ async fn handle_client(
                     }
                     return Ok(());
                 }
-                websocket::OwnedMessage::Ping(_items) => todo!(),
-                websocket::OwnedMessage::Pong(_items) => todo!(),
+                OwnedMessage::Ping(_items) => todo!(),
+                OwnedMessage::Pong(_items) => todo!(),
             },
 
             Err(websocket::WebSocketError::NoDataAvailable) => {
@@ -221,24 +233,58 @@ async fn create_channel(
     // let mut buf = String::new();
     match client.recv_message() {
         Ok(response) => {
-            // db.create("channel").content(Channel {
-            //     channel_name: buf,
-            //     owner: RecordId::new(table, key),
-            //     members: None,
-            //     created_at: Datetime::now(),
-            // });
             match response {
-                websocket::OwnedMessage::Text(text) => {
+                OwnedMessage::Text(text) => {
+                    // db.create("channel").content(Channel {
+                    //     channel_name: buf,
+                    //     owner: RecordId::new(table, key),
+                    //     members: None,
+                    //     created_at: Datetime::now(),
+                    // });
                     println!("Created channel {text}");
                 }
-                websocket::OwnedMessage::Binary(_items) => todo!(),
-                websocket::OwnedMessage::Close(_close_data) => todo!(),
-                websocket::OwnedMessage::Ping(_items) => todo!(),
-                websocket::OwnedMessage::Pong(_items) => todo!(),
+                OwnedMessage::Binary(_items) => todo!(),
+                OwnedMessage::Close(_close_data) => todo!(),
+                OwnedMessage::Ping(_items) => todo!(),
+                OwnedMessage::Pong(_items) => todo!(),
             }
         }
         Err(e) => {
             eprintln!("Failed to get new channel name: {e}");
+        }
+    }
+}
+
+async fn auth_client(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) -> Result<User> {
+    let _ = client.send_message(&Message::text("Username: "));
+    let username = client.recv_message()?;
+
+    let _ = client.send_message(&Message::text("Password: "));
+    let pswd = client.recv_message()?;
+
+    if let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) {
+        let user = db
+            .query(
+                "
+                        SELECT username, password
+                        FROM users
+                        WHERE username = $username
+                        AND password = $password
+                    ",
+            )
+            .bind((("username", username), ("password", pswd)))
+            .await?;
+
+        let mut response = user.check()?;
+        let user: Option<User> = response.take(0)?;
+        match user {
+            Some(user) => Ok(user),
+            None => {
+                eprintln!("Could not find user '{username}'");
+            }
         }
     }
 }
