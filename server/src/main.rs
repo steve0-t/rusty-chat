@@ -1,5 +1,6 @@
+use core::error;
 use std::{
-    error::Error,
+    clone,
     fs::File,
     io::{self, Read},
     net::{TcpListener, TcpStream},
@@ -21,9 +22,10 @@ use surrealdb::{
 };
 
 use tokio::time::timeout;
+use tokio_rustls::rustls::{HandshakeType::ClientHello, pki_types::pem::SectionKind::PrivateKey};
 use websocket::{
     Message, OwnedMessage,
-    header::{CacheDirective::Private, RelationType::SuccessorVersion},
+    header::{CacheDirective::Private, Preference::ReturnMinimal, RelationType::SuccessorVersion},
     native_tls::{Identity, TlsAcceptor, TlsStream},
     server::{WsServer, upgrade::WsUpgrade},
     sync::{Server, server::upgrade::Buffer},
@@ -31,7 +33,7 @@ use websocket::{
 
 use surrealdb_types::{RecordId, SurrealValue, Value};
 
-use anyhow::Result;
+use anyhow::{Error, Result, anyhow};
 
 enum CommandType {
     Quit = 1,
@@ -143,7 +145,7 @@ async fn deploy_server(
                     match handle_client(stream, &db).await {
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!("Server: client errored out: {e:?}");
+                            eprintln!("Server: client closed with error: {e:?}");
                         }
                     }
                 });
@@ -164,10 +166,21 @@ async fn handle_client(
     let mut client = stream.accept().unwrap();
 
     match auth_client(&db, &mut client).await {
-        Ok(_) => {}
-        Err(_) => todo!(),
+        Some(_) => {
+            return client_loop(db, &mut client).await;
+        }
+        None => {
+            let _ = client.send_message(&Message::close());
+            let _ = client.shutdown();
+            return Err(anyhow!("Failed to authenticate client"));
+        }
     };
+}
 
+async fn client_loop(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) -> Result<()> {
     loop {
         match client.recv_message() {
             Ok(msg) => match msg {
@@ -179,7 +192,8 @@ async fn handle_client(
                             let cmd = CommandType::try_from(op);
                             match cmd {
                                 Ok(CommandType::CreateChannel) => {
-                                    create_channel(&db, &mut client).await;
+                                    // create_channel(&db, client).await;
+                                    create_channel(&db, client).await;
                                 }
                                 Ok(CommandType::Quit) => {
                                     let message = Message::text("Bye client from server!");
@@ -258,33 +272,77 @@ async fn create_channel(
 async fn auth_client(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Result<User> {
+) -> Option<User> {
+    let _ = client.send_message(&Message::text(
+        "
+            1. Log in
+            2. Register
+        ",
+    ));
+    let method = client.recv_message().ok()?;
+    let OwnedMessage::Text(method) = method else {
+        return None;
+    };
+
+    match method.parse::<u32>() {
+        Ok(method) => {
+            if method == 1 {
+                log_in(db, client).await
+            } else if method == 2 {
+                register(db, client).await
+            } else {
+                return None;
+            }
+        }
+        Err(e) => {
+            eprintln!("User chose invalid method: {e:?}");
+            let _ = client.send_message(&Message::text("Invalid method, aborting."));
+            return None;
+        }
+    }
+}
+
+async fn log_in(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) -> Option<User> {
     let _ = client.send_message(&Message::text("Username: "));
-    let username = client.recv_message()?;
+    let username = client.recv_message().ok()?;
 
     let _ = client.send_message(&Message::text("Password: "));
-    let pswd = client.recv_message()?;
+    let pswd = client.recv_message().ok()?;
 
-    if let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) {
-        let user = db
-            .query(
-                "
+    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
+        return None;
+    };
+
+    let user = db
+        .query(
+            "
                         SELECT username, password
                         FROM users
                         WHERE username = $username
                         AND password = $password
                     ",
-            )
-            .bind((("username", username), ("password", pswd)))
-            .await?;
+        )
+        .bind((("username", username.as_str()), ("password", pswd.as_str())))
+        .await
+        .ok()?;
 
-        let mut response = user.check()?;
-        let user: Option<User> = response.take(0)?;
-        match user {
-            Some(user) => Ok(user),
-            None => {
-                eprintln!("Could not find user '{username}'");
-            }
+    let mut response = user.check().ok()?;
+    let user: Option<User> = response.take(0).ok()?;
+    match user {
+        Some(user) => Some(user),
+        None => {
+            eprintln!("Could not find user '{username}'");
+            None
         }
     }
+}
+
+async fn register(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) -> Option<User> {
+    return None;
 }
