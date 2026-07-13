@@ -11,3 +11,4 @@ anyhow = { version = "1.0.103", features = ["backtrace"] }
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-rustls = "0.26.4"
 futures-util = "0.3.32"
+tokio-util = "0.7.18"

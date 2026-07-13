@@ -629,6 +629,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "tokio-util",
  "tungstenite 0.29.0",
  "websocket",
 ]
