@@ -31,7 +31,7 @@ use websocket::{
     sync::{Server, server::upgrade::Buffer},
 };
 
-use surrealdb_types::{RecordId, SurrealValue, Value};
+use surrealdb_types::{RecordId, SurrealValue, Value, uuid};
 
 use anyhow::{Error, Result, anyhow};
 
@@ -51,9 +51,9 @@ struct Channel {
 #[derive(Debug, SurrealValue)]
 struct User {
     username: String,
-    user_id: RecordId,
+    user_id: Uuid,
     created_at: Datetime,
-    phone_number: Option<u32>,
+    phone_number: Option<String>,
     email_addr: Option<String>,
 }
 
@@ -344,5 +344,69 @@ async fn register(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<User> {
-    return None;
+    let _ = client.send_message(&Message::text("Username: "));
+    let username = client.recv_message().ok()?;
+
+    let _ = client.send_message(&Message::text("Password: "));
+    let pswd = client.recv_message().ok()?;
+
+    let _ = client.send_message(&Message::text("Repeat password: "));
+    let repeat_pswd = client.recv_message().ok()?;
+
+    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
+        (username, pswd, repeat_pswd)
+    else {
+        return None;
+    };
+
+    if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
+        let _ = client.send_message(&Message::text("Entered passwords do not match"));
+        return None;
+    }
+
+    let user = db
+        .query(
+            "
+                        SELECT username, password
+                        FROM users
+                        WHERE username = $username
+                        AND password = $password
+                    ",
+        )
+        .bind((("username", username.as_str()), ("password", pswd.as_str())))
+        .await;
+
+    match user {
+        Ok(_) => {
+            let _ = client.send_message(&Message::text("User '{username}' exists"));
+            return None;
+        }
+        Err(e) => {}
+    };
+
+    let _ = client.send_message(&Message::text("Enter phone number (optional): "));
+    let phone_number = match client.recv_message().ok()? {
+        OwnedMessage::Text(text) => Some(text),
+        _ => None,
+    };
+
+    let _ = client.send_message(&Message::text("Enter email address (optional): "));
+    let email_addr = match client.recv_message().ok()? {
+        OwnedMessage::Text(text) => Some(text),
+        _ => None,
+    };
+
+    let result: Option<User> = db
+        .insert(("user", username.as_str()))
+        .content(User {
+            username: username,
+            user_id: uuid::Uuid::new_v7(),
+            created_at: Datetime::now(),
+            phone_number: phone_number,
+            email_addr: email_addr,
+        })
+        .await
+        .ok()?;
+
+    None
 }
