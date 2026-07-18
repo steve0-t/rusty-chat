@@ -196,8 +196,8 @@ async fn client_loop(
                                     create_channel(&db, client).await;
                                 }
                                 Ok(CommandType::Quit) => {
-                                    let message = Message::text("Bye client from server!");
-                                    let _ = client.send_message(&message);
+                                    let _ = client
+                                        .send_message(&Message::text("Bye client from server!"));
                                     let _ = client.shutdown();
                                 }
                                 Err(e) => {
@@ -381,7 +381,7 @@ async fn register(
             let _ = client.send_message(&Message::text("User '{username}' exists"));
             return None;
         }
-        Err(e) => {}
+        Err(_e) => {}
     };
 
     let _ = client.send_message(&Message::text("Enter phone number (optional): "));
@@ -396,8 +396,8 @@ async fn register(
         _ => None,
     };
 
-    let result: Option<User> = db
-        .insert(("user", username.as_str()))
+    match db
+        .insert::<Option<User>>(("user", username.as_str()))
         .content(User {
             username: username,
             user_id: uuid::Uuid::new_v7(),
@@ -406,7 +406,12 @@ async fn register(
             email_addr: email_addr,
         })
         .await
-        .ok()?;
+    {
+        Ok(user) => user,
 
-    None
+        Err(e) => {
+            eprintln!("Failed to register user: {e:?}");
+            None
+        }
+    }
 }
