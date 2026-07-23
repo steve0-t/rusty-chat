@@ -12,3 +12,4 @@ tokio = { version = "1.52.3", features = ["full"] }
 anyhow = { version = "1.0.103", features = ["backtrace"] }
 surrealdb-types = { version = "3.2.0", features = ["convert", "arbitrary", "reqwest"] }
 tokio-rustls = "0.26.4"
+argon2 = "0.5.3"
