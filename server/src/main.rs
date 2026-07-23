@@ -2,7 +2,7 @@ use core::error;
 use std::{
     clone,
     fs::File,
-    io::{self, Read},
+    io::{self, ErrorKind::ArgumentListTooLong, Read},
     net::{TcpListener, TcpStream},
     ops::Sub,
     process::{Command, exit},
@@ -11,13 +11,18 @@ use std::{
     time::Duration,
 };
 
+use argon2::{
+    Algorithm::Argon2id,
+    Argon2, PasswordHasher,
+    password_hash::{SaltString, rand_core::OsRng},
+};
 use surrealdb::{
     Surreal,
     engine::{
         any::Any,
         remote::ws::{Client, Ws},
     },
-    opt::EndpointKind::SurrealKv,
+    opt::{EndpointKind::SurrealKv, auth::Root},
     types::{Datetime, Uuid},
 };
 
@@ -51,7 +56,7 @@ struct Channel {
 #[derive(Debug, SurrealValue)]
 struct User {
     username: String,
-    user_id: Uuid,
+    password: String,
     created_at: Datetime,
     phone_number: Option<String>,
     email_addr: Option<String>,
@@ -107,6 +112,20 @@ async fn main() -> Result<()> {
         .build()
         .expect("Failed to create TLS acceptor");
 
+    let db = timeout(
+        Duration::from_secs(5),
+        surrealdb::engine::any::connect("ws://localhost:8000"),
+    )
+    .await??;
+
+    db.signin(Root {
+        username: "chat_app_owner".to_string(),
+        password: "security".to_string(),
+    })
+    .await?;
+
+    db.use_ns("chat_app").use_db("production").await?;
+
     let addr = "127.0.0.1:9090".to_string();
     let mut server = match Server::bind_secure(&addr, tls_acceptor) {
         Ok(server) => {
@@ -118,13 +137,6 @@ async fn main() -> Result<()> {
             return Err(e.into());
         }
     };
-
-    let db = timeout(
-        Duration::from_secs(5),
-        surrealdb::engine::any::connect("ws://localhost:8000"),
-    )
-    .await??;
-    db.use_ns("main").use_db("main").await?;
 
     match deploy_server(&mut server, &db).await {
         Ok(()) => Ok(()),
@@ -166,7 +178,8 @@ async fn handle_client(
     let mut client = stream.accept().unwrap();
 
     match auth_client(&db, &mut client).await {
-        Some(_) => {
+        Some(user) => {
+            // println!("User info: {}", user.username);
             return client_loop(db, &mut client).await;
         }
         None => {
@@ -396,18 +409,27 @@ async fn register(
         _ => None,
     };
 
+    let salt = SaltString::generate(&mut OsRng);
+
+    let argon2 = Argon2::default();
+
+    let hashed_pass = argon2
+        .hash_password(&pswd.into_bytes(), &salt)
+        .ok()?
+        .to_string();
+
     match db
-        .insert::<Option<User>>(("user", username.as_str()))
+        .insert::<Vec<User>>("users")
         .content(User {
             username: username,
-            user_id: uuid::Uuid::new_v7(),
+            password: hashed_pass,
             created_at: Datetime::now(),
             phone_number: phone_number,
             email_addr: email_addr,
         })
         .await
     {
-        Ok(user) => user,
+        Ok(mut user) => user.pop(),
 
         Err(e) => {
             eprintln!("Failed to register user: {e:?}");
