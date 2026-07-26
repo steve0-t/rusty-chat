@@ -13,8 +13,8 @@ use std::{
 
 use argon2::{
     Algorithm::Argon2id,
-    Argon2, PasswordHasher,
-    password_hash::{SaltString, rand_core::OsRng},
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    password_hash::{PasswordHashString, SaltString, rand_core::OsRng},
 };
 use surrealdb::{
     Surreal,
@@ -179,8 +179,11 @@ async fn handle_client(
 
     match auth_client(&db, &mut client).await {
         Some(user) => {
-            // println!("User info: {}", user.username);
-            return client_loop(db, &mut client).await;
+            let _ = client.send_message(&Message::text(format!(
+                "Successfully logged in as {}",
+                user.username
+            )));
+            return client_loop(db, &mut client, &user.username.as_str()).await;
         }
         None => {
             let _ = client.send_message(&Message::close());
@@ -193,6 +196,7 @@ async fn handle_client(
 async fn client_loop(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+    username: &str,
 ) -> Result<()> {
     loop {
         match client.recv_message() {
@@ -329,27 +333,41 @@ async fn log_in(
         return None;
     };
 
+    // println!("getting user by username");
     let user = db
         .query(
             "
-                        SELECT username, password
-                        FROM users
-                        WHERE username = $username
-                        AND password = $password
-                    ",
+                SELECT * FROM users
+                WHERE username = $username
+            ",
         )
-        .bind((("username", username.as_str()), ("password", pswd.as_str())))
+        .bind(("username", username.as_str()))
         .await
         .ok()?;
 
+    // println!("getting indexed results");
     let mut response = user.check().ok()?;
+
+    // println!("getting first result");
     let user: Option<User> = response.take(0).ok()?;
-    match user {
-        Some(user) => Some(user),
-        None => {
-            eprintln!("Could not find user '{username}'");
-            None
+
+    // println!("verifying user");
+    if let Some(user) = user {
+        let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
+            return None;
+        };
+
+        let argon2 = Argon2::default();
+
+        match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
+            Ok(_) => Some(user),
+            Err(e) => {
+                eprintln!("Failed to verify user: {e:?}");
+                None
+            }
         }
+    } else {
+        None
     }
 }
 
