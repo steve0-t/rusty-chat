@@ -178,12 +178,12 @@ async fn handle_client(
     let mut client = stream.accept().unwrap();
 
     match auth_client(&db, &mut client).await {
-        Some(user) => {
+        Some(username) => {
             let _ = client.send_message(&Message::text(format!(
                 "Successfully logged in as {}",
-                user.username
+                username
             )));
-            return client_loop(db, &mut client, &user.username.as_str()).await;
+            return client_loop(db, &mut client, &username.as_str()).await;
         }
         None => {
             let _ = client.send_message(&Message::close());
@@ -289,7 +289,7 @@ async fn create_channel(
 async fn auth_client(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Option<User> {
+) -> Option<String> {
     let _ = client.send_message(&Message::text(
         "
             1. Log in
@@ -322,7 +322,7 @@ async fn auth_client(
 async fn log_in(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Option<User> {
+) -> Option<String> {
     let _ = client.send_message(&Message::text("Username: "));
     let username = client.recv_message().ok()?;
 
@@ -360,7 +360,7 @@ async fn log_in(
         let argon2 = Argon2::default();
 
         match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
-            Ok(_) => Some(user),
+            Ok(_) => Some(user.username),
             Err(e) => {
                 eprintln!("Failed to verify user: {e:?}");
                 None
@@ -374,7 +374,7 @@ async fn log_in(
 async fn register(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Option<User> {
+) -> Option<String> {
     let _ = client.send_message(&Message::text("Username: "));
     let username = client.recv_message().ok()?;
 
@@ -447,7 +447,7 @@ async fn register(
         })
         .await
     {
-        Ok(mut user) => user.pop(),
+        Ok(mut user) => Some(user.pop().unwrap().username),
 
         Err(e) => {
             eprintln!("Failed to register user: {e:?}");
