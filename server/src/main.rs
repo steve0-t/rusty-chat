@@ -9,6 +9,7 @@ use std::{
     rc::Rc,
     thread,
     time::Duration,
+    vec,
 };
 
 use argon2::{
@@ -40,6 +41,18 @@ use surrealdb_types::{RecordId, SurrealValue, Value, uuid};
 
 use anyhow::{Error, Result, anyhow};
 
+// macro_rules! strif {
+//     ( $( $x:expr ),* ) => {
+//         {
+//             let mut temp_vec = Vec::new();
+//             $(
+//                 temp_vec.push($x);
+//             )*
+//             temp_vec
+//         }
+//     };
+// }
+
 enum CommandType {
     Quit = 1,
     CreateChannel = 2,
@@ -54,9 +67,18 @@ struct Channel {
 }
 
 #[derive(Debug, SurrealValue)]
-struct User {
+struct UserInsert {
     username: String,
     password: String,
+    created_at: Datetime,
+    phone_number: Option<String>,
+    email_addr: Option<String>,
+}
+
+#[derive(Debug, SurrealValue)]
+struct UserSelect {
+    id: RecordId,
+    username: String,
     created_at: Datetime,
     phone_number: Option<String>,
     email_addr: Option<String>,
@@ -179,10 +201,10 @@ async fn handle_client(
 
     match auth_client(&db, &mut client).await {
         Some(username) => {
-            let _ = client.send_message(&Message::text(format!(
-                "Successfully logged in as {}",
-                username
-            )));
+            send_message_to_client(
+                &format!("Successfully logged in as {}", username).to_string(),
+                &mut client,
+            );
             return client_loop(db, &mut client, &username.as_str()).await;
         }
         None => {
@@ -210,7 +232,7 @@ async fn client_loop(
                             match cmd {
                                 Ok(CommandType::CreateChannel) => {
                                     // create_channel(&db, client).await;
-                                    create_channel(&db, client).await;
+                                    let _ = create_channel(&db, client, username, Vec::new()).await;
                                 }
                                 Ok(CommandType::Quit) => {
                                     let _ = client
@@ -258,31 +280,43 @@ async fn client_loop(
 async fn create_channel(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) {
-    let _ = client.send_message(&Message::text("Name of channel: "));
+    username: &str,
+    members: Vec<RecordId>,
+) -> Result<()> {
+    send_message_to_client(&"Name of channel: ".to_string(), client);
 
     // let mut buf = String::new();
-    match client.recv_message() {
-        Ok(response) => {
-            match response {
-                OwnedMessage::Text(text) => {
-                    // db.create("channel").content(Channel {
-                    //     channel_name: buf,
-                    //     owner: RecordId::new(table, key),
-                    //     members: None,
-                    //     created_at: Datetime::now(),
-                    // });
-                    println!("Created channel {text}");
-                }
-                OwnedMessage::Binary(_items) => todo!(),
-                OwnedMessage::Close(_close_data) => todo!(),
-                OwnedMessage::Ping(_items) => todo!(),
-                OwnedMessage::Pong(_items) => todo!(),
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to get new channel name: {e}");
-        }
+    let Ok(OwnedMessage::Text(channel_name)) = client.recv_message() else {
+        return Err(anyhow!("Failed to create channel"));
+    };
+
+    // println!("getting user by username");
+    let mut user = db
+        .query(
+            "
+                SELECT * FROM users
+                WHERE username = $username
+            ",
+        )
+        .bind(("username", username))
+        .await?;
+
+    let Some(user) = user.take::<Option<UserSelect>>(0)? else {
+        return Err(anyhow!("Failed to retrieve user"));
+    };
+
+    match db
+        .insert::<Vec<Channel>>("channels")
+        .content(Channel {
+            channel_name: channel_name,
+            owner: Some(user.id),
+            members: members,
+            created_at: Datetime::now(),
+        })
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow!(e)),
     }
 }
 
@@ -290,12 +324,14 @@ async fn auth_client(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<String> {
-    let _ = client.send_message(&Message::text(
-        "
+    send_message_to_client(
+        &"
             1. Log in
             2. Register
-        ",
-    ));
+        "
+        .to_string(),
+        client,
+    );
     let method = client.recv_message().ok()?;
     let OwnedMessage::Text(method) = method else {
         return None;
@@ -313,7 +349,7 @@ async fn auth_client(
         }
         Err(e) => {
             eprintln!("User chose invalid method: {e:?}");
-            let _ = client.send_message(&Message::text("Invalid method, aborting."));
+            send_message_to_client(&"Invalid method, aborting.".to_string(), client);
             return None;
         }
     }
@@ -323,10 +359,10 @@ async fn log_in(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<String> {
-    let _ = client.send_message(&Message::text("Username: "));
+    send_message_to_client(&"Username: ".to_string(), client);
     let username = client.recv_message().ok()?;
 
-    let _ = client.send_message(&Message::text("Password: "));
+    send_message_to_client(&"Password: ".to_string(), client);
     let pswd = client.recv_message().ok()?;
 
     let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
@@ -349,7 +385,7 @@ async fn log_in(
     let mut response = user.check().ok()?;
 
     // println!("getting first result");
-    let user: Option<User> = response.take(0).ok()?;
+    let user: Option<UserInsert> = response.take(0).ok()?;
 
     // println!("verifying user");
     if let Some(user) = user {
@@ -375,13 +411,13 @@ async fn register(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<String> {
-    let _ = client.send_message(&Message::text("Username: "));
+    send_message_to_client(&"Username: ".to_string(), client);
     let username = client.recv_message().ok()?;
 
-    let _ = client.send_message(&Message::text("Password: "));
+    send_message_to_client(&"Password: ".to_string(), client);
     let pswd = client.recv_message().ok()?;
 
-    let _ = client.send_message(&Message::text("Repeat password: "));
+    send_message_to_client(&"Repeat password: ".to_string(), client);
     let repeat_pswd = client.recv_message().ok()?;
 
     let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
@@ -391,37 +427,37 @@ async fn register(
     };
 
     if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
-        let _ = client.send_message(&Message::text("Entered passwords do not match"));
+        send_message_to_client(&"Entered passwords do not match".to_string(), client);
         return None;
     }
 
     let user = db
         .query(
             "
-                        SELECT username, password
-                        FROM users
-                        WHERE username = $username
-                        AND password = $password
-                    ",
+                SELECT username, password
+                FROM users
+                WHERE username = $username
+                AND password = $password
+            ",
         )
         .bind((("username", username.as_str()), ("password", pswd.as_str())))
         .await;
 
     match user {
         Ok(_) => {
-            let _ = client.send_message(&Message::text("User '{username}' exists"));
+            let _ = send_message_to_client(&"User '{username}' exists".to_string(), client);
             return None;
         }
         Err(_e) => {}
     };
 
-    let _ = client.send_message(&Message::text("Enter phone number (optional): "));
+    send_message_to_client(&"Enter phone number (optional): ".to_string(), client);
     let phone_number = match client.recv_message().ok()? {
         OwnedMessage::Text(text) => Some(text),
         _ => None,
     };
 
-    let _ = client.send_message(&Message::text("Enter email address (optional): "));
+    send_message_to_client(&"Enter email address (optional): ".to_string(), client);
     let email_addr = match client.recv_message().ok()? {
         OwnedMessage::Text(text) => Some(text),
         _ => None,
@@ -437,8 +473,8 @@ async fn register(
         .to_string();
 
     match db
-        .insert::<Vec<User>>("users")
-        .content(User {
+        .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
+        .content(UserInsert {
             username: username,
             password: hashed_pass,
             created_at: Datetime::now(),
@@ -447,11 +483,18 @@ async fn register(
         })
         .await
     {
-        Ok(mut user) => Some(user.pop().unwrap().username),
+        Ok(user) => user.map(|u| u.username),
 
         Err(e) => {
             eprintln!("Failed to register user: {e:?}");
             None
         }
     }
+}
+
+fn send_message_to_client(
+    msg: &str,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) {
+    let _ = client.send_message(&Message::text(msg));
 }
