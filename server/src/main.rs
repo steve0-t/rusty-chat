@@ -3,6 +3,7 @@ use std::{
     array, clone,
     fs::File,
     io::{self, ErrorKind::ArgumentListTooLong, Read},
+    mem::MaybeUninit,
     net::{TcpListener, TcpStream},
     ops::{Index, Sub},
     process::{Command, exit},
@@ -44,6 +45,7 @@ use anyhow::{Error, Result, anyhow};
 enum CommandType {
     Quit = 1,
     CreateChannel = 2,
+    OpenChannel = 3,
 }
 
 #[derive(Debug, SurrealValue)]
@@ -236,15 +238,23 @@ async fn client_loop(
                             println!("{op}");
                             let cmd = CommandType::try_from(op);
                             match cmd {
+                                Ok(CommandType::OpenChannel) => {
+                                    send_msg_to_client("Which: ", client);
+                                    // let which = client.recv_message()?;
+                                    // open_channel(which, db);
+                                }
+
                                 Ok(CommandType::CreateChannel) => {
                                     // create_channel(&db, client).await;
                                     let _ = create_channel(&db, client, username, Vec::new()).await;
                                 }
+
                                 Ok(CommandType::Quit) => {
                                     let _ = client
                                         .send_message(&Message::text("Bye client from server!"));
                                     let _ = client.shutdown();
                                 }
+
                                 Err(e) => {
                                     eprintln!("Unknown command: {e:?}");
                                 }
@@ -365,33 +375,14 @@ async fn log_in(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<String> {
-    send_msg_to_client(&"Username: ".to_string(), client);
-    let username = client.recv_message().ok()?;
-
-    send_msg_to_client(&"Password: ".to_string(), client);
-    let pswd = client.recv_message().ok()?;
+    let [username, pswd] = get_input_from_user(client, ["Username: ", "Password: "]).ok()?;
 
     let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
         return None;
     };
 
     // println!("getting user by username");
-    let user = db
-        .query(
-            "
-                SELECT * FROM users
-                WHERE username = $username
-            ",
-        )
-        .bind(("username", username.as_str()))
-        .await
-        .ok()?;
-
-    // println!("getting indexed results");
-    let mut response = user.check().ok()?;
-
-    // println!("getting first result");
-    let user: Option<UserInsert> = response.take(0).ok()?;
+    let user = get_user::<UserInsert>(&username, db).await;
 
     // println!("verifying user");
     if let Some(user) = user {
@@ -483,7 +474,7 @@ async fn register(
 }
 
 async fn display_channels(db: &Surreal<Any>, username: &str) -> Option<Vec<ChannelSelect>> {
-    match get_user(username, db).await {
+    match get_user::<UserSelect>(username, db).await {
         Some(user) => {
             let mut res = db
                 .query(
@@ -516,7 +507,10 @@ async fn open_channel(which: RecordId, db: &Surreal<Any>) -> Result<Vec<MessageT
     return Ok(res);
 }
 
-async fn get_user(username: &str, db: &Surreal<Any>) -> Option<UserSelect> {
+async fn get_user<T>(username: &str, db: &Surreal<Any>) -> Option<T>
+where
+    T: SurrealValue,
+{
     let mut user = db
         .query(
             "
@@ -528,7 +522,7 @@ async fn get_user(username: &str, db: &Surreal<Any>) -> Option<UserSelect> {
         .await
         .ok()?;
 
-    let user = user.take::<Option<UserSelect>>(0).ok()?;
+    let user = user.take::<Option<T>>(0).ok()?;
     return user;
 }
 
@@ -560,9 +554,15 @@ fn get_input_from_user<const N: usize>(
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
     input_prompts: [&str; N],
 ) -> Result<[OwnedMessage; N]> {
-    let ret = std::array::from_fn(|i| {
+    let mut ret: Vec<OwnedMessage> = Vec::with_capacity(N);
+
+    for i in 0..input_prompts.len() {
         send_msg_to_client(input_prompts[i], client);
-        client.recv_message().
-    })?;
-    Ok(ret)
+        ret.push(client.recv_message()?);
+    }
+
+    Ok(ret
+        .try_into()
+        .map_err(|_| anyhow!("Error: could not convert to array"))
+        .unwrap())
 }
