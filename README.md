@@ -3,7 +3,7 @@
 This is a chat app simulator made in rust.
 Inspired by telegram.
 Blazingly fast - perhaps?
-Goal is to have function GUI one day.
+Goal is to have functional GUI one day.
 Everything is done locally, no cloud.
 
 **NOT INTENDED FOR COMMERCIAL USE, IT IS A HOBBY PROJECT ONLY**
@@ -16,9 +16,9 @@ Everything is done locally, no cloud.
 
 # Usage
 
-Both _client_ and _server_ directories provide **simple** scripts that build and run the specific program.
-**Need to start surrealdb first.**
-Scripts need to be ran from project directory.
+- Both **client** and **server** directories provide _simple_ scripts that build and run the specific program.
+- **Need to start surrealdb first.**
+- Scripts need to be ran from project directory.
 
   - **TODO** add functionality descriptions to _client_ and _server_
 
