@@ -16,8 +16,8 @@ Everything is done locally, no cloud.
 
 # Usage
 
-- Both **client** and **server** directories provide _simple_ scripts that build and run the specific program.
 - **Need to start surrealdb first.**
+- Both **client** and **server** directories provide _simple_ scripts that build and run the specific program.
 - Scripts need to be ran from project directory.
 
   - **TODO** add functionality descriptions to _client_ and _server_
