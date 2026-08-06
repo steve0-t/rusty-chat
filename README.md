@@ -1,4 +1,4 @@
-# Introduction
+# Description
 
 This is a chat app simulator made in rust.
 Inspired by telegram.
@@ -20,7 +20,7 @@ Everything is done locally, no cloud.
 - Both **client** and **server** directories provide _simple_ scripts that build and run the specific program.
 - Scripts need to be ran from project directory.
 
-  - **TODO** add functionality descriptions to _client_ and _server_
+- **TODO** add functionality descriptions to _client_ and _server_
 
 # Known limitations
 Its a hobby project, lower your expectations.
