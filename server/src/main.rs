@@ -45,7 +45,8 @@ use anyhow::{Error, Result, anyhow};
 enum CommandType {
     Quit = 1,
     CreateChannel = 2,
-    OpenChannel = 3,
+    DisplayChannels = 3,
+    OpenChannel = 4,
 }
 
 #[derive(Debug, SurrealValue)]
@@ -238,6 +239,8 @@ async fn client_loop(
                             println!("{op}");
                             let cmd = CommandType::try_from(op);
                             match cmd {
+                                Ok(CommandType::DisplayChannels) => {}
+
                                 Ok(CommandType::OpenChannel) => {
                                     send_msg_to_client("Which: ", client);
                                     // let which = client.recv_message()?;
@@ -382,7 +385,7 @@ async fn log_in(
     };
 
     // println!("getting user by username");
-    let user = get_user::<UserInsert>(&username, db).await;
+    let user = get_user::<UserInsert>(&username, Some(&pswd), db).await;
 
     // println!("verifying user");
     if let Some(user) = user {
@@ -422,7 +425,7 @@ async fn register(
         return None;
     }
 
-    let user = get_user_with_pswd(&username, &pswd, db).await;
+    let user = get_user::<UserSelect>(&username, Some(&pswd), db).await;
 
     match user {
         Some(_) => {
@@ -474,7 +477,7 @@ async fn register(
 }
 
 async fn display_channels(db: &Surreal<Any>, username: &str) -> Option<Vec<ChannelSelect>> {
-    match get_user::<UserSelect>(username, db).await {
+    match get_user::<UserSelect>(username, None, db).await {
         Some(user) => {
             let mut res = db
                 .query(
@@ -507,7 +510,7 @@ async fn open_channel(which: RecordId, db: &Surreal<Any>) -> Result<Vec<MessageT
     return Ok(res);
 }
 
-async fn get_user<T>(username: &str, db: &Surreal<Any>) -> Option<T>
+async fn get_user<T>(username: &str, pswd: Option<&str>, db: &Surreal<Any>) -> Option<T>
 where
     T: SurrealValue,
 {
@@ -518,28 +521,15 @@ where
                 WHERE username = $username
             ",
         )
-        .bind(("username", username))
-        .await
-        .ok()?;
+        .bind(("username", username));
 
-    let user = user.take::<Option<T>>(0).ok()?;
-    return user;
-}
+    if pswd.is_some() {
+        user = user
+            .query("AND password = $password")
+            .bind(("password", pswd.unwrap()))
+    }
 
-async fn get_user_with_pswd(username: &str, pswd: &str, db: &Surreal<Any>) -> Option<UserSelect> {
-    let mut user = db
-        .query(
-            "
-                SELECT * FROM users
-                WHERE username = $username
-                AND password = $password
-            ",
-        )
-        .bind((("username", username), ("password", pswd)))
-        .await
-        .ok()?;
-
-    let user = user.take::<Option<UserSelect>>(0).ok()?;
+    let user = user.await.ok()?.take::<Option<T>>(0).ok()?;
     return user;
 }
 
