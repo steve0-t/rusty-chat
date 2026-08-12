@@ -13,4 +13,4 @@ tokio = { version = "1.52.3", features = ["full"] }
 tokio-rustls = "0.26.4"
 futures-util = "0.3.32"
 tokio-util = "0.7.18"
-secret-service = "5.1.0"
+secret-service = { version = "5.0.0", features = ["rt-tokio-crypto-rust"] }
