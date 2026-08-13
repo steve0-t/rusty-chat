@@ -1,67 +1,40 @@
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{self, BufRead, BufReader, Read},
-    net::TcpStream,
     sync::Arc,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
-use tokio::signal;
+use secret_service::{SecretService, blocking::Item};
+use tokio::{net::TcpStream, signal};
 use tokio_rustls::rustls::{
     ClientConfig, RootCertStore,
     client::AlwaysResolvesClientRawPublicKeys,
     pki_types::{CertificateDer, pem::PemObject},
 };
 
-use futures_util::{self, SinkExt, StreamExt, TryStreamExt};
-use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
+use futures_util::{self, SinkExt, StreamExt, TryStreamExt, stream::SplitSink};
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream,
+    tungstenite::{Message, Utf8Bytes},
+};
 use tokio_util::sync::CancellationToken;
+use tungstenite::Bytes;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let certs: Vec<_> = CertificateDer::pem_file_iter("rootCA.pem")
-        .unwrap()
-        .collect();
+    let session_token = get_session_token().await?;
 
-    let mut root_cert_store = RootCertStore::empty();
-
-    for cert in certs {
-        match cert {
-            Ok(cert) => {
-                match root_cert_store.add(cert) {
-                    Ok(()) => (),
-                    Err(e) => {
-                        eprintln!("Failed to add certificate to store: {e:?}");
-                    }
-                };
-            }
-            Err(e) => {
-                eprintln!("Failed to add certificate: {e:?}");
-            }
-        }
-    }
-
-    let config = ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
-
-    let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
-
-    let (mut ws_stream, response) = tokio_tungstenite::connect_async_tls_with_config(
-        "wss://127.0.0.1:9090",
-        None,
-        false,
-        Some(connector),
-    )
-    .await?;
+    let ws_stream = establish_ws_connection().await?;
 
     let (mut write, mut read) = ws_stream.split();
 
-    // Step 1: Create a new CancellationToken
+    match restore_session() {}
+
     let token = CancellationToken::new();
 
-    // Step 2: Clone the token for use in another task
     let cloned_token = token.clone();
 
     let read_handle = tokio::spawn(async move {
@@ -108,6 +81,94 @@ async fn main() -> Result<()> {
     });
 
     let _ = tokio::try_join!(read_handle, write_handle);
+
+    Ok(())
+}
+
+async fn get_session_token() -> Result<Vec<u8>> {
+    let ss = match SecretService::connect(secret_service::EncryptionType::Dh).await {
+        Ok(res) => res,
+        Err(secret_service::Error::Unavailable) => {
+            return Err(anyhow!("No secret service found"));
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // let collection = ss.get_default_collection().await?;
+
+    let search_items = ss
+        .search_items(HashMap::from([("app", "chat_app"), ("key", "session_key")]))
+        .await?;
+
+    let session_token = match search_items.unlocked.first() {
+        Some(item) => item,
+        None => {
+            let locked_item = search_items
+                .locked
+                .first()
+                .expect("Search didn't return any items!");
+            locked_item.unlock().await.unwrap();
+            locked_item
+        }
+    };
+    Ok(session_token.get_secret().await?)
+}
+
+async fn establish_ws_connection() -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    let certs: Vec<_> = CertificateDer::pem_file_iter("rootCA.pem")
+        .unwrap()
+        .collect();
+
+    let mut root_cert_store = RootCertStore::empty();
+
+    for cert in certs {
+        match cert {
+            Ok(cert) => {
+                match root_cert_store.add(cert) {
+                    Ok(()) => (),
+                    Err(e) => {
+                        eprintln!("Failed to add certificate to store: {e:?}");
+                    }
+                };
+            }
+            Err(e) => {
+                eprintln!("Failed to add certificate: {e:?}");
+            }
+        }
+    }
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+
+    let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
+
+    let (ws_stream, response) = tokio_tungstenite::connect_async_tls_with_config(
+        "wss://127.0.0.1:9090",
+        None,
+        false,
+        Some(connector),
+    )
+    .await?;
+
+    return Ok(ws_stream);
+}
+
+async fn restore_session(
+    token: Vec<u8>,
+    write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+) -> Result<()> {
+    match write_sink
+        .send(Message::text(Utf8Bytes::try_from(token)?))
+        .await
+    {
+        Ok(_) => {}
+
+        Err(e) => {
+            eprintln!("Client: {e}");
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }
