@@ -1,37 +1,39 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
-    io::{self, BufRead, BufReader, Read},
+    io::{self, BufRead},
     sync::Arc,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 
-use secret_service::{SecretService, blocking::Item};
-use tokio::{net::TcpStream, signal};
+use secret_service::SecretService;
+use tokio::net::TcpStream;
 use tokio_rustls::rustls::{
     ClientConfig, RootCertStore,
-    client::AlwaysResolvesClientRawPublicKeys,
     pki_types::{CertificateDer, pem::PemObject},
 };
 
-use futures_util::{self, SinkExt, StreamExt, TryStreamExt, stream::SplitSink};
+use futures_util::{self, SinkExt, StreamExt, stream::SplitSink};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
     tungstenite::{Message, Utf8Bytes},
 };
 use tokio_util::sync::CancellationToken;
-use tungstenite::Bytes;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let session_token = get_session_token().await?;
+    let session_token = get_session_token().await;
 
     let ws_stream = establish_ws_connection().await?;
 
     let (mut write, mut read) = ws_stream.split();
 
-    match restore_session() {}
+    let access_token = if session_token.is_none() {
+        request_session(&mut write).await;
+    } else {
+        let session_token = session_token.unwrap();
+        restore_session(session_token, &mut write).await;
+    };
 
     let token = CancellationToken::new();
 
@@ -85,35 +87,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn get_session_token() -> Result<Vec<u8>> {
-    let ss = match SecretService::connect(secret_service::EncryptionType::Dh).await {
-        Ok(res) => res,
-        Err(secret_service::Error::Unavailable) => {
-            return Err(anyhow!("No secret service found"));
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    // let collection = ss.get_default_collection().await?;
-
-    let search_items = ss
-        .search_items(HashMap::from([("app", "chat_app"), ("key", "session_key")]))
-        .await?;
-
-    let session_token = match search_items.unlocked.first() {
-        Some(item) => item,
-        None => {
-            let locked_item = search_items
-                .locked
-                .first()
-                .expect("Search didn't return any items!");
-            locked_item.unlock().await.unwrap();
-            locked_item
-        }
-    };
-    Ok(session_token.get_secret().await?)
-}
-
 async fn establish_ws_connection() -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
     let certs: Vec<_> = CertificateDer::pem_file_iter("rootCA.pem")
         .unwrap()
@@ -143,7 +116,7 @@ async fn establish_ws_connection() -> Result<WebSocketStream<MaybeTlsStream<TcpS
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
 
-    let (ws_stream, response) = tokio_tungstenite::connect_async_tls_with_config(
+    let (ws_stream, _response) = tokio_tungstenite::connect_async_tls_with_config(
         "wss://127.0.0.1:9090",
         None,
         false,
@@ -152,6 +125,40 @@ async fn establish_ws_connection() -> Result<WebSocketStream<MaybeTlsStream<TcpS
     .await?;
 
     return Ok(ws_stream);
+}
+
+async fn get_session_token() -> Option<Vec<u8>> {
+    let ss = match SecretService::connect(secret_service::EncryptionType::Dh).await {
+        Ok(res) => res,
+        Err(secret_service::Error::Unavailable) => {
+            eprintln!("No secret service found");
+            return None;
+        }
+        Err(e) => {
+            eprintln!("Failed to retrieve session token: {e:?}");
+            return None;
+        }
+    };
+
+    // let collection = ss.get_default_collection().await?;
+
+    let search_items = ss
+        .search_items(HashMap::from([("app", "chat_app"), ("key", "session_key")]))
+        .await
+        .ok()?;
+
+    let session_token = match search_items.unlocked.first() {
+        Some(item) => item,
+        None => {
+            let locked_item = search_items
+                .locked
+                .first()
+                .expect("Search didn't return any items!");
+            locked_item.unlock().await.unwrap();
+            locked_item
+        }
+    };
+    session_token.get_secret().await.ok()
 }
 
 async fn restore_session(
@@ -171,4 +178,9 @@ async fn restore_session(
     }
 
     Ok(())
+}
+
+async fn request_session(
+    write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+) {
 }
