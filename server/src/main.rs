@@ -18,6 +18,8 @@ use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::{PasswordHashString, SaltString, rand_core::OsRng},
 };
+use rand::RngExt;
+use sha2::{Digest, Sha512};
 use surrealdb::{
     Surreal,
     engine::{
@@ -29,7 +31,10 @@ use surrealdb::{
 };
 
 use tokio::time::timeout;
-use tokio_rustls::rustls::{HandshakeType::ClientHello, pki_types::pem::SectionKind::PrivateKey};
+use tokio_rustls::rustls::{
+    HandshakeType::ClientHello, crypto::hash::HashAlgorithm::SHA256,
+    pki_types::pem::SectionKind::PrivateKey,
+};
 use websocket::{
     Message, OwnedMessage,
     header::{CacheDirective::Private, Preference::ReturnMinimal, RelationType::SuccessorVersion},
@@ -42,7 +47,7 @@ use surrealdb_types::{RecordId, SurrealValue, Value, uuid};
 
 use anyhow::{Error, Result, anyhow};
 
-enum CommandType {
+pub enum CommandType {
     Quit = 1,
     CreateChannel = 2,
     DisplayChannels = 3,
@@ -50,7 +55,7 @@ enum CommandType {
 }
 
 #[derive(Debug, SurrealValue)]
-struct ChannelInsert {
+pub struct ChannelInsert {
     channel_name: String,
     owner: Option<RecordId>,
     members: Vec<RecordId>,
@@ -58,7 +63,7 @@ struct ChannelInsert {
 }
 
 #[derive(Debug, SurrealValue)]
-struct ChannelSelect {
+pub struct ChannelSelect {
     id: RecordId,
     channel_name: String,
     owner: Option<RecordId>,
@@ -67,7 +72,7 @@ struct ChannelSelect {
 }
 
 #[derive(Debug, SurrealValue)]
-struct UserInsert {
+pub struct UserInsert {
     username: String,
     password: String,
     created_at: Datetime,
@@ -76,7 +81,7 @@ struct UserInsert {
 }
 
 #[derive(Debug, SurrealValue)]
-struct UserSelect {
+pub struct UserSelect {
     id: RecordId,
     username: String,
     created_at: Datetime,
@@ -85,13 +90,27 @@ struct UserSelect {
 }
 
 #[derive(Debug, SurrealValue)]
-struct MessageType {
+pub struct MessageType {
     sender: RecordId,
     channel: RecordId,
     sent_at: Datetime,
     status: String,
     content: Vec<String>,
 }
+
+#[derive(Debug, SurrealValue)]
+pub struct SessionSelect {
+    user_id: RecordId,
+    token_hash: String,
+    device_info: String,
+    created_at: Datetime,
+    expires_at: Datetime,
+    last_used_at: Datetime,
+    revoked_at: Datetime,
+}
+
+#[derive(Debug, SurrealValue)]
+pub struct AccessToken(String);
 
 impl TryFrom<u32> for CommandType {
     type Error = ();
@@ -208,6 +227,10 @@ async fn handle_client(
 ) -> Result<()> {
     let mut client = stream.accept().unwrap();
 
+    let access_token = try_to_restore_session(db, &mut client).await;
+
+    if access_token.is_some() {}
+
     match auth_client(&db, &mut client).await {
         Some(username) => {
             send_msg_to_client(
@@ -222,6 +245,47 @@ async fn handle_client(
             return Err(anyhow!("Failed to authenticate client"));
         }
     };
+}
+
+async fn try_to_restore_session(
+    db: &Surreal<Any>,
+    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+) -> Option<AccessToken> {
+    match client.recv_message() {
+        Ok(token) => {
+            let OwnedMessage::Text(token) = token else {
+                return None;
+            };
+
+            let res = db
+                .select::<Option<SessionSelect>>(("sessions", hash_token(&token)))
+                .await
+                .ok()?;
+
+            if res.is_some() {
+                return Some(generate_access_token());
+            } else {
+                return None;
+            }
+        }
+
+        Err(e) => {
+            println!("Received invalid message: {e:?}");
+            return None;
+        }
+    };
+}
+
+fn generate_access_token() -> AccessToken {
+    let mut bytes = [0u8; 48];
+    rand::fill(&mut bytes);
+    AccessToken(hex::encode(bytes))
+}
+
+fn hash_token(token: &str) -> String {
+    let binding = Into::<[u8; 64]>::into(Sha512::digest(token.as_bytes()));
+    let res = str::from_utf8(&binding).unwrap();
+    res.to_string()
 }
 
 async fn client_loop(
