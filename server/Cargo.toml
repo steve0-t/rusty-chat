@@ -13,3 +13,6 @@ anyhow = { version = "1.0.103", features = ["backtrace"] }
 surrealdb-types = { version = "3.2.0", features = ["convert", "arbitrary", "reqwest"] }
 tokio-rustls = "0.26.4"
 argon2 = "0.5.3"
+sha2 = "0.11.0"
+rand = "0.10.2"
+hex = "0.4.3"
