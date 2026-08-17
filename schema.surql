@@ -25,3 +25,12 @@ define field channel on table messages type record<channels> reference;
 define field sent_at on table messages type datetime default time::now();
 define field status on table messages type string;
 define field content on table messages type array<string>;
+
+define table if not exists sessions;
+define field user_id on table sessions type record<users> reference;
+define field token_hash on table sessions type string;
+define field created_at on table sessions type datetime;
+define field expires_at on table sessions type datetime;
+define field last_used_at on table sessions type datetime;
+define field revoked_at on table sessions type datetime;
+define field device_info on table sessions type string;
