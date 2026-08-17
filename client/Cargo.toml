@@ -14,3 +14,5 @@ tokio-rustls = "0.26.4"
 futures-util = "0.3.32"
 tokio-util = "0.7.18"
 secret-service = { version = "5.0.0", features = ["rt-tokio-crypto-rust"] }
+rand = "0.10.2"
+hex = "0.4.3"
