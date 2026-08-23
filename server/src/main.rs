@@ -188,10 +188,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    match deploy_server(&mut server, &db).await {
-        Ok(()) => Ok(()),
-        Err(e) => Err(e),
-    }
+    deploy_server(&mut server, &db).await
 }
 
 async fn deploy_server(
@@ -257,8 +254,13 @@ async fn try_to_restore_session(
                 return None;
             };
 
+            let hashed_token = match hash_token(&token) {
+                Some(token) => token,
+                None => return None,
+            };
+
             let res = db
-                .select::<Option<SessionSelect>>(("sessions", hash_token(&token)))
+                .select::<Option<SessionSelect>>(("sessions", hashed_token))
                 .await
                 .ok()?;
 
@@ -282,10 +284,16 @@ fn generate_access_token() -> AccessToken {
     AccessToken(hex::encode(bytes))
 }
 
-fn hash_token(token: &str) -> String {
+fn hash_token(token: &str) -> Option<String> {
     let binding = Into::<[u8; 64]>::into(Sha512::digest(token.as_bytes()));
-    let res = str::from_utf8(&binding).unwrap();
-    res.to_string()
+    let res = match str::from_utf8(&binding) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Server: failed to hash token: {e:?}");
+            return None;
+        }
+    };
+    Some(res.to_string())
 }
 
 async fn client_loop(
@@ -448,8 +456,10 @@ async fn log_in(
         return None;
     };
 
+    // println!("{username} {pswd}");
     // println!("getting user by username");
-    let user = get_user::<UserInsert>(&username, Some(&pswd), db).await;
+
+    let user = get_user::<UserInsert>(&username, db).await;
 
     // println!("verifying user");
     if let Some(user) = user {
@@ -467,6 +477,7 @@ async fn log_in(
             }
         }
     } else {
+        eprintln!("Server: failed to fetch user");
         None
     }
 }
@@ -489,7 +500,7 @@ async fn register(
         return None;
     }
 
-    let user = get_user::<UserSelect>(&username, Some(&pswd), db).await;
+    let user = get_user::<UserSelect>(&username, db).await;
 
     match user {
         Some(_) => {
@@ -541,7 +552,7 @@ async fn register(
 }
 
 async fn display_channels(db: &Surreal<Any>, username: &str) -> Option<Vec<ChannelSelect>> {
-    match get_user::<UserSelect>(username, None, db).await {
+    match get_user::<UserSelect>(username, db).await {
         Some(user) => {
             let mut res = db
                 .query(
@@ -574,11 +585,11 @@ async fn open_channel(which: RecordId, db: &Surreal<Any>) -> Result<Vec<MessageT
     return Ok(res);
 }
 
-async fn get_user<T>(username: &str, pswd: Option<&str>, db: &Surreal<Any>) -> Option<T>
+async fn get_user<T>(username: &str, db: &Surreal<Any>) -> Option<T>
 where
     T: SurrealValue,
 {
-    let mut user = db
+    let user = db
         .query(
             "
                 SELECT * FROM users
@@ -586,12 +597,6 @@ where
             ",
         )
         .bind(("username", username));
-
-    if pswd.is_some() {
-        user = user
-            .query("AND password = $password")
-            .bind(("password", pswd.unwrap()))
-    }
 
     let user = user.await.ok()?.take::<Option<T>>(0).ok()?;
     return user;
