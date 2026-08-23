@@ -2,38 +2,52 @@ use std::{
     collections::HashMap,
     io::{self, BufRead},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::Result;
 
 use secret_service::SecretService;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_rustls::rustls::{
     ClientConfig, RootCertStore,
     pki_types::{CertificateDer, pem::PemObject},
 };
 
-use futures_util::{self, SinkExt, StreamExt, stream::SplitSink};
+use futures_util::{self, SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
-    tungstenite::{Message, Utf8Bytes},
+    tungstenite::{Connector, Message, Utf8Bytes},
 };
 use tokio_util::sync::CancellationToken;
 
+pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let session_token = get_session_token().await;
+    // let session_token = get_session_token().await;
 
+    let connection_thread = tokio::spawn(async move {
+        loop {
+            println!("CLient: establishing connection to server...");
+            let _ = handle_connection().await;
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        }
+    })
+    .await?;
+
+    // let access_token = match session_token {
+    //     Some(session_token) => restore_session(session_token, &mut write, &mut read).await?,
+
+    //     None => request_session(&mut write).await?,
+    // };
+
+    Ok(())
+}
+
+async fn handle_connection() -> Result<()> {
     let ws_stream = establish_ws_connection().await?;
-
     let (mut write, mut read) = ws_stream.split();
-
-    let access_token = if session_token.is_none() {
-        request_session(&mut write).await;
-    } else {
-        let session_token = session_token.unwrap();
-        restore_session(session_token, &mut write).await;
-    };
 
     let token = CancellationToken::new();
 
@@ -83,7 +97,6 @@ async fn main() -> Result<()> {
     });
 
     let _ = tokio::try_join!(read_handle, write_handle);
-
     Ok(())
 }
 
@@ -116,15 +129,12 @@ async fn establish_ws_connection() -> Result<WebSocketStream<MaybeTlsStream<TcpS
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
 
-    let (ws_stream, _response) = tokio_tungstenite::connect_async_tls_with_config(
-        "wss://127.0.0.1:9090",
-        None,
-        false,
-        Some(connector),
-    )
-    .await?;
+    // let (ws_stream, _response) =
+    let (ws_stream, _resp) =
+        tokio_tungstenite::connect_async_tls_with_config(SERVER_IP, None, false, Some(connector))
+            .await?;
 
-    return Ok(ws_stream);
+    Ok(ws_stream)
 }
 
 async fn get_session_token() -> Option<Vec<u8>> {
@@ -164,6 +174,7 @@ async fn get_session_token() -> Option<Vec<u8>> {
 async fn restore_session(
     token: Vec<u8>,
     write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    read_sink: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
 ) -> Result<()> {
     match write_sink
         .send(Message::text(Utf8Bytes::try_from(token)?))
@@ -182,5 +193,6 @@ async fn restore_session(
 
 async fn request_session(
     write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-) {
+) -> Result<()> {
+    Ok(())
 }
