@@ -39,6 +39,7 @@
           websocat
           surrealdb.packages.${system}.default
           mkcert
+          clippy
         ]
         ++ (with pkgs-unstable; [
           surrealist
