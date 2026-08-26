@@ -125,6 +125,8 @@ impl TryFrom<u32> for CommandType {
     }
 }
 
+pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut cert_file = match File::open("rustychat.com+4.pem") {
@@ -176,7 +178,7 @@ async fn main() -> Result<()> {
 
     db.use_ns("chat_app").use_db("production").await?;
 
-    let addr = "127.0.0.1:9090".to_string();
+    let addr = SERVER_IP;
     let mut server = match Server::bind_secure(&addr, tls_acceptor) {
         Ok(server) => {
             println!("Server: Ready! Listening on {addr}");
