@@ -2,13 +2,17 @@ use std::{
     collections::HashMap,
     io::{self, BufRead},
     sync::Arc,
+    thread,
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use secret_service::SecretService;
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{self, Receiver, channel},
+};
 use tokio_rustls::rustls::{
     ClientConfig, RootCertStore,
     pki_types::{CertificateDer, pem::PemObject},
@@ -21,20 +25,87 @@ use tokio_tungstenite::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::{
+    DefaultTerminal, Frame,
+    buffer::Buffer,
+    layout::Rect,
+    macros::ratatui_core,
+    style::Stylize,
+    symbols::border,
+    text::{Line, Text},
+    widgets::{Block, Paragraph, Widget},
+};
+
 pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
+
+#[derive(Debug, Default)]
+pub struct App {
+    exit: bool,
+}
+
+impl App {
+    /// runs the application's main loop until the user quits
+    fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+
+    fn handle_events(&mut self) -> io::Result<()> {
+        match event::poll(Duration::from_millis(50)) {
+            Ok(true) => match event::read() {
+                Ok(e) => {
+                    if e.is_key_press() {
+                        self.handle_key_event(&e.as_key_event().unwrap())
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to capture key event: {e:?}");
+                }
+            },
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_key_event(&self, e: &KeyEvent) {
+        todo!()
+    }
+}
+
+impl Widget for &App {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let title = Line::from(" Chat app ".bold());
+
+        let instructions = Line::from(vec![
+            // Text on the bottom
+            " Quit ".into(),
+            "<Q> ".blue().bold(),
+        ]);
+
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructions.centered())
+            .border_set(border::THICK)
+            .render(area, buf);
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // let session_token = get_session_token().await;
+    let (stream, sink) = channel::<String>(5);
 
-    let connection_thread = tokio::spawn(async move {
-        loop {
-            println!("CLient: establishing connection to server...");
-            let _ = handle_connection().await;
-            tokio::time::sleep(Duration::from_millis(1500)).await;
-        }
-    })
-    .await?;
+    let networking_thread = thread::spawn(|| {
+        networking_runtime(sink);
+    });
 
     // let access_token = match session_token {
     //     Some(session_token) => restore_session(session_token, &mut write, &mut read).await?,
@@ -42,7 +113,16 @@ async fn main() -> Result<()> {
     //     None => request_session(&mut write).await?,
     // };
 
-    Ok(())
+    ratatui::run(|terminal| App::default().run(terminal))
+}
+
+#[tokio::main]
+async fn networking_runtime(sink: Receiver<String>) {
+    loop {
+        // println!("CLient: establishing connection to server...");
+        let _ = handle_connection().await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
 }
 
 async fn handle_connection() -> Result<()> {
