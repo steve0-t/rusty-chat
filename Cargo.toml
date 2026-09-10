@@ -11,6 +11,13 @@ edition = "2024"
 resolver = "2"
 members = ["server", "client"]
 
+[profile.dev]
+debug = 2
+
+[profile.dev.package."*"]
+debug = "line-tables-only"
+
+
 # Source - https://stackoverflow.com/a/36604610
 # Posted by Dogbert, modified by community. See post 'Timeline' for change history
 # Retrieved 2026-06-15, License - CC BY-SA 4.0
