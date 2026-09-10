@@ -129,7 +129,7 @@ pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut cert_file = match File::open("rustychat.com+4.pem") {
+    let mut cert_file = match File::open("certs/rustychat.com+4.pem") {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Could not open certificate file: {e:?}");
@@ -138,10 +138,9 @@ async fn main() -> Result<()> {
     };
 
     let mut cert_buf = vec![];
-
     cert_file.read_to_end(&mut cert_buf)?;
 
-    let mut cert_key_file = match File::open("rustychat.com+4-key.pem") {
+    let mut cert_key_file = match File::open("certs/rustychat.com+4-key.pem") {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Could not open certificate key file: {e:?}");
