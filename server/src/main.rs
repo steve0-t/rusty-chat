@@ -429,127 +429,23 @@ async fn auth_client(
         return None;
     };
 
-    match method.parse::<u32>() {
-        Ok(method) => {
-            if method == 1 {
-                log_in(db, client).await
-            } else if method == 2 {
-                register(db, client).await
-            } else {
-                return None;
-            }
-        }
-        Err(e) => {
-            eprintln!("User chose invalid method: {e:?}");
-            send_msg_to_client(&"Invalid method, aborting.".to_string(), client);
-            return None;
-        }
-    }
-}
-
-async fn log_in(
-    db: &Surreal<Any>,
-    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Option<String> {
-    let [username, pswd] = get_input_from_user(client, ["Username: ", "Password: "]).ok()?;
-
-    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
-        return None;
-    };
-
-    // println!("{username} {pswd}");
-    // println!("getting user by username");
-
-    let user = get_user::<UserInsert>(&username, db).await;
-
-    // println!("verifying user");
-    if let Some(user) = user {
-        let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
-            return None;
-        };
-
-        let argon2 = Argon2::default();
-
-        match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
-            Ok(_) => Some(user.username),
-            Err(e) => {
-                eprintln!("Failed to verify user: {e:?}");
-                None
-            }
-        }
-    } else {
-        eprintln!("Server: failed to fetch user");
-        None
-    }
-}
-
-async fn register(
-    db: &Surreal<Any>,
-    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-) -> Option<String> {
-    let [username, pswd, repeat_pswd] =
-        get_input_from_user(client, ["Username: ", "Password: ", "Repeat password: "]).ok()?;
-
-    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
-        (username, pswd, repeat_pswd)
-    else {
-        return None;
-    };
-
-    if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
-        send_msg_to_client(&"Entered passwords do not match".to_string(), client);
-        return None;
-    }
-
-    let user = get_user::<UserSelect>(&username, db).await;
-
-    match user {
-        Some(_) => {
-            let _ = send_msg_to_client(&"User '{username}' already exists".to_string(), client);
-            return None;
-        }
-        None => {}
-    };
-
-    send_msg_to_client(&"Enter phone number (optional): ".to_string(), client);
-    let phone_number = match client.recv_message().ok()? {
-        OwnedMessage::Text(text) => Some(text),
-        _ => None,
-    };
-
-    send_msg_to_client(&"Enter email address (optional): ".to_string(), client);
-    let email_addr = match client.recv_message().ok()? {
-        OwnedMessage::Text(text) => Some(text),
-        _ => None,
-    };
-
-    let salt = SaltString::generate(&mut OsRng);
-
-    let argon2 = Argon2::default();
-
-    let hashed_pass = argon2
-        .hash_password(&pswd.into_bytes(), &salt)
-        .ok()?
-        .to_string();
-
-    match db
-        .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
-        .content(UserInsert {
-            username: username,
-            password: hashed_pass,
-            created_at: Datetime::now(),
-            phone_number: phone_number,
-            email_addr: email_addr,
-        })
-        .await
-    {
-        Ok(user) => user.map(|u| u.username),
-
-        Err(e) => {
-            eprintln!("Failed to register user: {e:?}");
-            None
-        }
-    }
+    None
+    // match method.parse::<u32>() {
+    //     Ok(method) => {
+    //         if method == 1 {
+    //             log_in(db, client).await
+    //         } else if method == 2 {
+    //             register(db, client).await
+    //         } else {
+    //             return None;
+    //         }
+    //     }
+    //     Err(e) => {
+    //         eprintln!("User chose invalid method: {e:?}");
+    //         send_msg_to_client(&"Invalid method, aborting.".to_string(), client);
+    //         return None;
+    //     }
+    // }
 }
 
 async fn display_channels(db: &Surreal<Any>, username: &str) -> Option<Vec<ChannelSelect>> {

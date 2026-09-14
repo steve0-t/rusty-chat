@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{self, BufRead, Read},
     sync::Arc,
-    thread,
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -11,6 +11,7 @@ use anyhow::Result;
 
 use ratatui::{Terminal, backend::CrosstermBackend};
 use secret_service::SecretService;
+use surrealdb::{Surreal, engine::any::Any};
 use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, channel},
@@ -35,6 +36,9 @@ use crate::{
 
 pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
 
+type ReadHandle = JoinHandle<()>;
+type WriteHandle = JoinHandle<()>;
+
 pub mod app;
 pub mod app_event;
 pub mod tui;
@@ -50,26 +54,24 @@ async fn main() -> Result<()> {
     // let session_token = get_session_token().await;
     let (sender, receiver) = channel::<String>(5);
 
-    let networking_thread = thread::spawn(|| {
-        networking_runtime(receiver);
-    });
+    // let access_token = match get_session_token().await {
+    //     Some(session_token) => restore_session(session_token, &mut write, &mut read).await?,
+    //     None => request_session(&mut write).await?,
+    // };
 
-    let access_token = match get_session_token().await {
-        Some(session_token) => restore_session(session_token, &mut write, &mut read).await?,
-        None => request_session(&mut write).await?,
-    };
-
-    let last_logged_user = get_last_logged_user()?;
-
+    // connect to db service
     let db = timeout(
         Duration::from_secs(5),
         surrealdb::engine::any::connect("ws://localhost:8000"),
     )
     .await??;
-    db.use_ns("chat_app_local").use_db(last_logged_user).await?;
 
     // create app instance
-    let mut app = app::App::new();
+    let mut app = Arc::from(app::App::new());
+
+    let networking_thread = thread::spawn(|| {
+        networking_runtime(receiver, app.clone());
+    });
 
     // initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
@@ -78,8 +80,23 @@ async fn main() -> Result<()> {
     let mut tui = Tui::new(terminal, events);
     tui.enter()?;
 
+    // try to get last logged user
+    // if some, use their db
+    // else auth user
+    let user = get_last_logged_user();
+    if user.is_none() {
+        let user = log_in(&db).await;
+
+        if user.is_none() {
+            app.failed_to_get_user = true;
+        }
+    }
+    db.use_ns("chat_app_local").use_db(user).await?;
+
     // start the main loop.
     while !app.should_quit {
+
+
         // Render the user interface.
         tui.draw(&mut app)?;
 
@@ -99,7 +116,7 @@ async fn main() -> Result<()> {
 
 /// loop for networking thread
 #[tokio::main]
-async fn networking_runtime(receiver: Receiver<String>) {
+async fn networking_runtime(receiver: Receiver<String>, app: Arc<app::App>) {
     let certs: Vec<_> = CertificateDer::pem_file_iter("certs/rootCA.pem")
         .unwrap()
         .collect();
@@ -130,13 +147,19 @@ async fn networking_runtime(receiver: Receiver<String>) {
 
     loop {
         // println!("CLient: establishing connection to server...");
-        let _ = handle_connection(connector.clone()).await;
+        let (read_handle, write_handle) = match handle_connection(connector.clone()).await {
+            Ok(res) => res,
+            Err(e) => {
+                app.connection_available = false;
+                return ();
+            }
+        }
         tokio::time::sleep(Duration::from_millis(1500)).await;
     }
 }
 
 /// generates read and write handles for new connection
-async fn handle_connection(connector: Connector) -> Result<()> {
+async fn handle_connection(connector: Connector) -> Result<(ReadHandle, WriteHandle)> {
     let ws_stream = establish_ws_connection(connector).await?;
     let (mut write, mut read) = ws_stream.split();
 
@@ -187,8 +210,7 @@ async fn handle_connection(connector: Connector) -> Result<()> {
         }
     });
 
-    let _ = tokio::try_join!(read_handle, write_handle);
-    Ok(())
+    Ok([read_handle, write_handle])
 }
 
 /// TODO write description
@@ -240,7 +262,7 @@ async fn get_session_token() -> Option<Vec<u8>> {
 async fn restore_session(
     token: Vec<u8>,
     write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    read_sink: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    _read_sink: &mut SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
 ) -> Result<()> {
     match write_sink
         .send(Message::text(Utf8Bytes::try_from(token)?))
@@ -258,24 +280,123 @@ async fn restore_session(
 }
 
 async fn request_session(
-    write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    _write_sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
 ) -> Result<()> {
     Ok(())
 }
 
-async fn sync_channels() -> Option<Vec<ChannelSelect>> {}
+// async fn sync_channels() -> Option<Vec<ChannelSelect>> {}
 
-fn get_last_logged_user() -> Result<String> {
+fn get_last_logged_user() -> Option<String> {
     let mut file = match File::open("users/last_logged_in") {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Could not open certificate file: {e:?}");
-            return Err(e.into());
+            return None;
         }
     };
 
     let mut user = String::with_capacity(256 as usize);
-    file.read_to_string(&mut user)?;
+    file.read_to_string(&mut user).ok()?;
 
-    Ok(user)
+    Some(user)
+}
+
+async fn log_in(db: &Surreal<Any>) -> Option<String> {
+    let [username, pswd] = app.get_input_from_user(["Username: ", "Password: "]).ok()?;
+
+    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
+        return None;
+    };
+
+    // println!("{username} {pswd}");
+    // println!("getting user by username");
+
+    let user = get_user::<UserInsert>(&username, db).await;
+
+    // println!("verifying user");
+    if let Some(user) = user {
+        let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
+            return None;
+        };
+
+        let argon2 = Argon2::default();
+
+        match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
+            Ok(_) => Some(user.username),
+            Err(e) => {
+                eprintln!("Failed to verify user: {e:?}");
+                None
+            }
+        }
+    } else {
+        eprintln!("Server: failed to fetch user");
+        None
+    }
+}
+
+async fn register(db: &Surreal<Any>) -> Option<String> {
+    let [username, pswd, repeat_pswd] =
+        get_input_from_user(["Username: ", "Password: ", "Repeat password: "]).ok()?;
+
+    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
+        (username, pswd, repeat_pswd)
+    else {
+        return None;
+    };
+
+    if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
+        send_msg_to_client(&"Entered passwords do not match".to_string(), client);
+        return None;
+    }
+
+    let user = get_user::<UserSelect>(&username, db).await;
+
+    match user {
+        Some(_) => {
+            let _ = send_msg_to_client(&"User '{username}' already exists".to_string(), client);
+            return None;
+        }
+        None => {}
+    };
+
+    send_msg_to_client(&"Enter phone number (optional): ".to_string(), client);
+    let phone_number = match client.recv_message().ok()? {
+        OwnedMessage::Text(text) => Some(text),
+        _ => None,
+    };
+
+    send_msg_to_client(&"Enter email address (optional): ".to_string(), client);
+    let email_addr = match client.recv_message().ok()? {
+        OwnedMessage::Text(text) => Some(text),
+        _ => None,
+    };
+
+    let salt = SaltString::generate(&mut OsRng);
+
+    let argon2 = Argon2::default();
+
+    let hashed_pass = argon2
+        .hash_password(&pswd.into_bytes(), &salt)
+        .ok()?
+        .to_string();
+
+    match db
+        .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
+        .content(UserInsert {
+            username: username,
+            password: hashed_pass,
+            created_at: Datetime::now(),
+            phone_number: phone_number,
+            email_addr: email_addr,
+        })
+        .await
+    {
+        Ok(user) => user.map(|u| u.username),
+
+        Err(e) => {
+            eprintln!("Failed to register user: {e:?}");
+            None
+        }
+    }
 }
