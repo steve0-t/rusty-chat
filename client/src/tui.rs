@@ -47,8 +47,13 @@ impl Tui {
         Ok(())
     }
 
+    /// higher level abstraction over `terminal.draw()`
     pub fn draw(&mut self, app: &mut App) -> Result<()> {
         self.terminal.draw(|frame| ui::render(app, frame))?;
+        Ok(())
+    }
+
+    pub fn draw_log_in_screen(&mut self, app: &mut App) -> Result<()> {
         Ok(())
     }
 

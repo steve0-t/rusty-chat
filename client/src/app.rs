@@ -1,6 +1,11 @@
 #[derive(Debug, Default)]
 pub struct App {
     pub should_quit: bool,
+    pub register: bool,
+    pub failed_to_get_user: bool,
+    pub get_input: bool,
+    pub in_buf: String,
+    pub connection_available: bool,
 }
 
 impl App {
@@ -15,5 +20,9 @@ impl App {
     /// Set should_quit to true to quit the application.
     pub fn quit(&mut self) {
         self.should_quit = true;
+    }
+
+    pub fn get_input_from_user<const N: usize>(fields: [&str; N]) -> [String, N] {
+
     }
 }
