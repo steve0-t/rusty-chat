@@ -53,10 +53,6 @@ impl Tui {
         Ok(())
     }
 
-    pub fn draw_log_in_screen(&mut self, app: &mut App) -> Result<()> {
-        Ok(())
-    }
-
     /// resets the terminal interface
     fn reset() -> Result<()> {
         terminal::disable_raw_mode()?;

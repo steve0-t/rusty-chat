@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{self, BufRead, Read},
     sync::Arc,
-    thread::{self, JoinHandle},
+    thread::{self},
     time::Duration,
 };
 
@@ -14,7 +14,8 @@ use secret_service::SecretService;
 use surrealdb::{Surreal, engine::any::Any};
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{Receiver, channel},
+    sync::mpsc::{Receiver, Sender, channel},
+    task::JoinHandle,
     time::timeout,
 };
 use tokio_rustls::rustls::{
@@ -49,10 +50,24 @@ pub enum RequestData {
     Username = 1,
 }
 
+enum NetworkingMessages {
+    FailedToConnect = 1,
+}
+
+// impl TryFrom<isize> for NetworkingMessages {
+//     fn try_from(value: isize) -> Result<Self, Self::Error> {
+//         match value {
+//             1 => Ok(Self::FailedToConnect),
+//             _ => Err("Failed to convert value".to_string()),
+//         }
+//     }
+
+//     type Error = String;
+// }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // let session_token = get_session_token().await;
-    let (sender, receiver) = channel::<String>(5);
 
     // let access_token = match get_session_token().await {
     //     Some(session_token) => restore_session(session_token, &mut write, &mut read).await?,
@@ -67,10 +82,11 @@ async fn main() -> Result<()> {
     .await??;
 
     // create app instance
-    let mut app = Arc::from(app::App::new());
+    let mut app = app::App::new();
 
+    let (sender, mut receiver) = channel::<NetworkingMessages>(5);
     let networking_thread = thread::spawn(|| {
-        networking_runtime(receiver, app.clone());
+        networking_runtime(sender);
     });
 
     // initialize the terminal user interface.
@@ -83,19 +99,25 @@ async fn main() -> Result<()> {
     // try to get last logged user
     // if some, use their db
     // else auth user
-    let user = get_last_logged_user();
-    if user.is_none() {
-        let user = log_in(&db).await;
-
-        if user.is_none() {
-            app.failed_to_get_user = true;
-        }
-    }
-    db.use_ns("chat_app_local").use_db(user).await?;
+    let mut user = get_last_logged_user();
+    // db.use_ns("chat_app_local").use_db(user).await?;
 
     // start the main loop.
     while !app.should_quit {
+        poll_networking_messages(&mut receiver, &mut app);
 
+        if user.is_none() {
+            app.failed_to_get_user = true;
+            user = match get_user(&mut app) {
+                Some(user) => Some(user),
+                None => todo!(
+                    "handle could not get user and no user data available (nothing to dipsplay)"
+                ),
+            };
+        } else {
+            app.display_user = true;
+            app.username = user.clone().unwrap();
+        }
 
         // Render the user interface.
         tui.draw(&mut app)?;
@@ -105,7 +127,7 @@ async fn main() -> Result<()> {
             AppEvent::Tick => {}
             AppEvent::Key(key_event) => update::update(&mut app, key_event),
             AppEvent::Mouse(_) => {}
-            AppEvent::Resize(newX, newY) => {}
+            AppEvent::Resize(new_x, new_y) => {}
         };
     }
 
@@ -116,7 +138,7 @@ async fn main() -> Result<()> {
 
 /// loop for networking thread
 #[tokio::main]
-async fn networking_runtime(receiver: Receiver<String>, app: Arc<app::App>) {
+async fn networking_runtime(sender: Sender<NetworkingMessages>) {
     let certs: Vec<_> = CertificateDer::pem_file_iter("certs/rootCA.pem")
         .unwrap()
         .collect();
@@ -150,10 +172,10 @@ async fn networking_runtime(receiver: Receiver<String>, app: Arc<app::App>) {
         let (read_handle, write_handle) = match handle_connection(connector.clone()).await {
             Ok(res) => res,
             Err(e) => {
-                app.connection_available = false;
+                let _ = sender.send(NetworkingMessages::FailedToConnect).await;
                 return ();
             }
-        }
+        };
         tokio::time::sleep(Duration::from_millis(1500)).await;
     }
 }
@@ -210,7 +232,7 @@ async fn handle_connection(connector: Connector) -> Result<(ReadHandle, WriteHan
         }
     });
 
-    Ok([read_handle, write_handle])
+    Ok((read_handle, write_handle))
 }
 
 /// TODO write description
@@ -302,101 +324,131 @@ fn get_last_logged_user() -> Option<String> {
     Some(user)
 }
 
-async fn log_in(db: &Surreal<Any>) -> Option<String> {
-    let [username, pswd] = app.get_input_from_user(["Username: ", "Password: "]).ok()?;
+async fn log_in(app: &mut app::App) -> Option<String> {
+    app.get_input = true;
 
-    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
-        return None;
-    };
+    // let [username, pswd] = app
+    app.get_input_from_user(Vec::from([
+        "Username: ".to_string(),
+        "Password: ".to_string(),
+    ]));
 
-    // println!("{username} {pswd}");
-    // println!("getting user by username");
+    None
 
-    let user = get_user::<UserInsert>(&username, db).await;
+    // let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
+    //     return None;
+    // };
 
-    // println!("verifying user");
-    if let Some(user) = user {
-        let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
-            return None;
-        };
+    // // println!("{username} {pswd}");
+    // // println!("getting user by username");
 
-        let argon2 = Argon2::default();
+    // // let user = get_user::<UserInsert>(&username, db).await;
 
-        match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
-            Ok(_) => Some(user.username),
-            Err(e) => {
-                eprintln!("Failed to verify user: {e:?}");
-                None
-            }
-        }
-    } else {
-        eprintln!("Server: failed to fetch user");
-        None
-    }
+    // // println!("verifying user");
+    // if let Some(user) = user {
+    //     let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
+    //         return None;
+    //     };
+
+    //     let argon2 = Argon2::default();
+
+    //     match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
+    //         Ok(_) => Some(user.username),
+    //         Err(e) => {
+    //             eprintln!("Failed to verify user: {e:?}");
+    //             None
+    //         }
+    //     }
+    // } else {
+    //     eprintln!("Server: failed to fetch user");
+    //     None
+    // }
 }
 
-async fn register(db: &Surreal<Any>) -> Option<String> {
-    let [username, pswd, repeat_pswd] =
-        get_input_from_user(["Username: ", "Password: ", "Repeat password: "]).ok()?;
+async fn register(app: &app::App) -> Option<String> {
+    // let [username, pswd, repeat_pswd] =
+    //     get_input_from_user(["Username: ", "Password: ", "Repeat password: "]).ok()?;
 
-    let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
-        (username, pswd, repeat_pswd)
-    else {
-        return None;
-    };
+    // let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
+    //     (username, pswd, repeat_pswd)
+    // else {
+    //     return None;
+    // };
 
-    if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
-        send_msg_to_client(&"Entered passwords do not match".to_string(), client);
-        return None;
-    }
+    // if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
+    //     send_msg_to_client(&"Entered passwords do not match".to_string(), client);
+    //     return None;
+    // }
 
-    let user = get_user::<UserSelect>(&username, db).await;
+    // // let user = get_user::<UserSelect>(&username, db).await;
 
-    match user {
-        Some(_) => {
-            let _ = send_msg_to_client(&"User '{username}' already exists".to_string(), client);
-            return None;
+    // match user {
+    //     Some(_) => {
+    //         let _ = send_msg_to_client(&"User '{username}' already exists".to_string(), client);
+    //         return None;
+    //     }
+    //     None => {}
+    // };
+
+    // send_msg_to_client(&"Enter phone number (optional): ".to_string(), client);
+    // let phone_number = match client.recv_message().ok()? {
+    //     OwnedMessage::Text(text) => Some(text),
+    //     _ => None,
+    // };
+
+    // send_msg_to_client(&"Enter email address (optional): ".to_string(), client);
+    // let email_addr = match client.recv_message().ok()? {
+    //     OwnedMessage::Text(text) => Some(text),
+    //     _ => None,
+    // };
+
+    // let salt = SaltString::generate(&mut OsRng);
+
+    // let argon2 = Argon2::default();
+
+    // let hashed_pass = argon2
+    //     .hash_password(&pswd.into_bytes(), &salt)
+    //     .ok()?
+    //     .to_string();
+
+    // match db
+    //     .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
+    //     .content(UserInsert {
+    //         username: username,
+    //         password: hashed_pass,
+    //         created_at: Datetime::now(),
+    //         phone_number: phone_number,
+    //         email_addr: email_addr,
+    //     })
+    //     .await
+    // {
+    //     Ok(user) => user.map(|u| u.username),
+
+    //     Err(e) => {
+    //         eprintln!("Failed to register user: {e:?}");
+    //         None
+    //     }
+    // }
+    None
+}
+
+fn poll_networking_messages(receiver: &mut Receiver<NetworkingMessages>, app: &mut app::App) {
+    match receiver.try_recv() {
+        Ok(value) => match value {
+            NetworkingMessages::FailedToConnect => {
+                app.connection_available = true;
+            }
+        },
+
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+            // todo!("Hande TryRecvError::Disconnected")
         }
-        None => {}
     };
+}
 
-    send_msg_to_client(&"Enter phone number (optional): ".to_string(), client);
-    let phone_number = match client.recv_message().ok()? {
-        OwnedMessage::Text(text) => Some(text),
-        _ => None,
-    };
+fn get_user(app: &mut app::App) -> Option<String> {
+    let user = log_in(app);
 
-    send_msg_to_client(&"Enter email address (optional): ".to_string(), client);
-    let email_addr = match client.recv_message().ok()? {
-        OwnedMessage::Text(text) => Some(text),
-        _ => None,
-    };
-
-    let salt = SaltString::generate(&mut OsRng);
-
-    let argon2 = Argon2::default();
-
-    let hashed_pass = argon2
-        .hash_password(&pswd.into_bytes(), &salt)
-        .ok()?
-        .to_string();
-
-    match db
-        .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
-        .content(UserInsert {
-            username: username,
-            password: hashed_pass,
-            created_at: Datetime::now(),
-            phone_number: phone_number,
-            email_addr: email_addr,
-        })
-        .await
-    {
-        Ok(user) => user.map(|u| u.username),
-
-        Err(e) => {
-            eprintln!("Failed to register user: {e:?}");
-            None
-        }
-    }
+    None
 }

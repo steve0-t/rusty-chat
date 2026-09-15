@@ -1,11 +1,18 @@
+use crate::ui;
+
 #[derive(Debug, Default)]
 pub struct App {
     pub should_quit: bool,
-    pub register: bool,
     pub failed_to_get_user: bool,
     pub get_input: bool,
     pub in_buf: String,
     pub connection_available: bool,
+    pub log_in: bool,
+    pub register: bool,
+    pub display_user: bool,
+
+    pub username: String,
+    pub fields: Vec<String>,
 }
 
 impl App {
@@ -22,7 +29,7 @@ impl App {
         self.should_quit = true;
     }
 
-    pub fn get_input_from_user<const N: usize>(fields: [&str; N]) -> [String, N] {
-
+    pub fn get_input_from_user(&mut self, fields: Vec<String>) {
+        self.get_input = true;
     }
 }
