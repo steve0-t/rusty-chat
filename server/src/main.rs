@@ -47,13 +47,6 @@ use surrealdb_types::{RecordId, SurrealValue, Value, uuid};
 
 use anyhow::{Error, Result, anyhow};
 
-pub enum CommandType {
-    Quit = 1,
-    CreateChannel = 2,
-    DisplayChannels = 3,
-    OpenChannel = 4,
-}
-
 #[derive(Debug, SurrealValue)]
 pub struct ChannelInsert {
     channel_name: String,
@@ -112,13 +105,20 @@ pub struct SessionSelect {
 #[derive(Debug, SurrealValue)]
 pub struct AccessToken(String);
 
+pub enum CommandType {
+    Quit = 1,
+    CreateChannel = 2,
+    DisplayChannels = 3,
+    OpenChannel = 4,
+}
+
 impl TryFrom<u32> for CommandType {
     type Error = ();
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            x if x == CommandType::Quit as u32 => Ok(CommandType::Quit),
-            x if x == CommandType::CreateChannel as u32 => Ok(CommandType::CreateChannel),
+            1 => Ok(CommandType::Quit),
+            2 => Ok(CommandType::CreateChannel),
             // x if x == CommandType::C as i32 => Ok(CommandType::C),
             _ => Err(()),
         }
