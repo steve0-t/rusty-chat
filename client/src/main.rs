@@ -99,25 +99,21 @@ async fn main() -> Result<()> {
     // try to get last logged user
     // if some, use their db
     // else auth user
-    let mut user = get_last_logged_user();
-    // db.use_ns("chat_app_local").use_db(user).await?;
+    match get_last_logged_user() {
+        Some(user) => {
+            db.use_ns("chat_app_local").use_db(user.as_str()).await?;
+            app.app_state = app::AppState::Main;
+            app.username = user;
+        }
+
+        None => {
+            app.app_state = app::AppState::LogIn;
+        }
+    };
 
     // start the main loop.
     while !app.should_quit {
         poll_networking_messages(&mut receiver, &mut app);
-
-        if user.is_none() {
-            app.failed_to_get_user = true;
-            user = match get_user(&mut app) {
-                Some(user) => Some(user),
-                None => todo!(
-                    "handle could not get user and no user data available (nothing to dipsplay)"
-                ),
-            };
-        } else {
-            app.display_user = true;
-            app.username = user.clone().unwrap();
-        }
 
         // Render the user interface.
         tui.draw(&mut app)?;
@@ -312,10 +308,7 @@ async fn request_session(
 fn get_last_logged_user() -> Option<String> {
     let mut file = match File::open("users/last_logged_in") {
         Ok(res) => res,
-        Err(e) => {
-            eprintln!("Could not open certificate file: {e:?}");
-            return None;
-        }
+        Err(_e) => return None,
     };
 
     let mut user = String::with_capacity(256 as usize);
