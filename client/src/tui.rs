@@ -11,7 +11,11 @@ use anyhow::Result;
 
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
 
-use crate::{app::App, app_event::EventHandler, ui};
+use crate::{
+    app::{App, LoginState, MainState, Screen},
+    app_event::EventHandler,
+    ui,
+};
 
 /// representation of a terminal user interface
 ///
@@ -49,18 +53,10 @@ impl Tui {
 
     /// high level abstraction over `terminal.draw()`
     pub fn draw(&mut self, app: &mut App) -> Result<()> {
-        match app.app_state {
-            crate::app::AppState::Main => {
-                self.render_main_screen(app);
-            }
-
-            crate::app::AppState::LogIn => {
-                self.render_login_screen(app);
-            }
-
-            crate::app::AppState::Register => {
-                self.render_register_screen(app);
-            }
+        match &app.screen {
+            Screen::Loading => self.render_loading_screen(),
+            Screen::LogIn(login_state) => self.render_login_screen(login_state),
+            Screen::Main(main_state) => self.render_main_screen(main_state),
         };
 
         Ok(())
@@ -80,19 +76,25 @@ impl Tui {
         Ok(())
     }
 
-    fn render_main_screen(&mut self, app: &mut App) -> Result<()> {
+    fn render_loading_screen(&mut self) -> Result<()> {
         self.terminal
-            .draw(|frame| ui::render_main_screen(app, frame))?;
+            .draw(|frame| ui::render_loading_screen(frame))?;
         Ok(())
     }
 
-    fn render_login_screen(&mut self, app: &mut App) -> Result<()> {
+    fn render_main_screen(&mut self, state: &MainState) -> Result<()> {
         self.terminal
-            .draw(|frame| ui::render_login_screen(app, frame))?;
+            .draw(|frame| ui::render_main_screen(state, frame))?;
         Ok(())
     }
 
-    fn render_register_screen(&mut self, app: &mut App) -> Result<()> {
+    fn render_login_screen(&mut self, state: &LoginState) -> Result<()> {
+        self.terminal
+            .draw(|frame| ui::render_login_screen(state, frame))?;
+        Ok(())
+    }
+
+    fn render_register_screen(&mut self, state: LoginState) -> Result<()> {
         todo!()
     }
 }

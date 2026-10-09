@@ -1,36 +1,30 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::App;
-use crate::app::AppState;
+use crate::app::InputMode;
+use crate::app::LoginField;
+use crate::app::LoginState;
+use crate::app::Screen;
 
 pub fn update(app: &mut App, key_event: KeyEvent) {
-    match app.app_state {
-        AppState::Main => todo!(),
-        AppState::LogIn => handle_login_key_event(app, key_event),
-        AppState::Register => todo!(),
+    match &mut app.screen {
+        Screen::Loading => {}
+
+        Screen::LogIn(login_state) => {
+            handle_login_key_event(login_state, key_event);
+        }
+
+        Screen::Main(main_state) => todo!(),
     };
 }
 
-fn handle_login_key_event(app: &mut App, key_event: KeyEvent) {
+fn handle_login_key_event(state: &mut LoginState, key_event: KeyEvent) {
     match key_event.code {
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('c') | KeyCode::Char('C')
-            if key_event.modifiers == KeyModifiers::CONTROL =>
-        {
-            app.quit()
-        }
-
-        KeyCode::Char('n') => {
-            app.login_change_focus = !app.login_change_focus;
-        }
-
-        KeyCode::Char('i') => {
-            app.login_getting_input = true;
-        }
-
-        KeyCode::Char(to_process) => {
-            app.in_buf.push(to_process);
-        }
+        KeyCode::Tab => match state.focused_field {
+            LoginField::Username => state.focused_field = LoginField::Password,
+            LoginField::Password => state.focused_field = LoginField::Username,
+        },
 
         _ => {}
-    };
+    }
 }

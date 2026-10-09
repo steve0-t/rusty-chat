@@ -1,40 +1,27 @@
-use std::default;
-
-use crate::ui;
-
 #[derive(Debug)]
-pub enum AppState {
-    Main,
-    LogIn,
-    Register,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        AppState::LogIn
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct App {
     pub should_quit: bool,
-    pub failed_to_get_user: bool,
-    pub get_input: bool,
-    pub in_buf: String,
-    pub connection_available: bool,
-    pub log_in: bool,
-    pub register: bool,
-    pub login_change_focus: bool,
-    pub login_getting_input: bool,
-    pub app_state: AppState,
-    pub username: String,
-    pub fields: Vec<String>,
+    pub connection: ConnectionStatus,
+    pub screen: Screen,
+    // pub username: String,
+}
+
+#[derive(Debug)]
+pub enum ConnectionStatus {
+    Connected,
+    Disconnected,
+    Connecting,
 }
 
 impl App {
     /// Constructs a new instance of [`App`].
     pub fn new() -> Self {
-        Self::default()
+        // todo!("Implement app constructor")
+        Self {
+            should_quit: false,
+            connection: ConnectionStatus::Disconnected,
+            screen: Screen::Loading,
+        }
     }
 
     /// Handles the tick event of the terminal.
@@ -44,8 +31,37 @@ impl App {
     pub fn quit(&mut self) {
         self.should_quit = true;
     }
+}
 
-    pub fn get_input_from_user(&mut self, fields: Vec<String>) {
-        self.get_input = true;
-    }
+#[derive(Debug)]
+pub enum Screen {
+    Loading,
+    LogIn(LoginState),
+    Main(MainState),
+    // Register(RegisterState),
+}
+
+#[derive(Debug)]
+pub enum InputMode {
+    Normal,
+    Editing,
+}
+
+#[derive(Debug)]
+pub struct LoginState {
+    pub username: String,
+    pub password: String,
+    pub focused_field: LoginField,
+    pub message: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct MainState {
+    pub input: String,
+}
+
+#[derive(Debug)]
+pub enum LoginField {
+    Username,
+    Password,
 }

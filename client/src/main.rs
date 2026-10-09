@@ -31,6 +31,7 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    app::{ConnectionStatus, LoginField, LoginState, MainState},
     app_event::{AppEvent, EventHandler},
     tui::Tui,
 };
@@ -88,6 +89,7 @@ async fn main() -> Result<()> {
     let networking_thread = thread::spawn(|| {
         networking_runtime(sender);
     });
+    app.connection = app::ConnectionStatus::Connected;
 
     // initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
@@ -102,12 +104,20 @@ async fn main() -> Result<()> {
     match get_last_logged_user() {
         Some(user) => {
             db.use_ns("chat_app_local").use_db(user.as_str()).await?;
-            app.app_state = app::AppState::Main;
-            app.username = user;
+            app.screen = app::Screen::Main(MainState {
+                input: String::with_capacity(256),
+            });
+            // app.username = user;
         }
 
         None => {
-            app.app_state = app::AppState::LogIn;
+            // app.app_state = app::AppState::LogIn;
+            app.screen = app::Screen::LogIn(LoginState {
+                username: String::with_capacity(128),
+                password: String::with_capacity(128),
+                focused_field: LoginField::Username,
+                message: None,
+            });
         }
     };
 
@@ -318,14 +328,6 @@ fn get_last_logged_user() -> Option<String> {
 }
 
 async fn log_in(app: &mut app::App) -> Option<String> {
-    app.get_input = true;
-
-    // let [username, pswd] = app
-    app.get_input_from_user(Vec::from([
-        "Username: ".to_string(),
-        "Password: ".to_string(),
-    ]));
-
     None
 
     // let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
@@ -428,9 +430,7 @@ async fn register(app: &app::App) -> Option<String> {
 fn poll_networking_messages(receiver: &mut Receiver<NetworkingMessages>, app: &mut app::App) {
     match receiver.try_recv() {
         Ok(value) => match value {
-            NetworkingMessages::FailedToConnect => {
-                app.connection_available = true;
-            }
+            NetworkingMessages::FailedToConnect => app.connection = ConnectionStatus::Disconnected,
         },
 
         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}

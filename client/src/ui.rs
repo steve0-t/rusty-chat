@@ -8,9 +8,11 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
 };
 
-use crate::app::{App, AppState};
+use crate::app::{App, LoginField, LoginState, MainState, Screen};
 
-pub fn render_login_screen(app: &mut App, frame: &mut Frame) {
+pub fn render_loading_screen(frame: &mut Frame) {}
+
+pub fn render_login_screen(state: &LoginState, frame: &mut Frame) {
     let centered_area = frame
         .area()
         .centered(Constraint::Percentage(20), Constraint::Percentage(30));
@@ -37,12 +39,16 @@ pub fn render_login_screen(app: &mut App, frame: &mut Frame) {
 
     let not_focused_block = Block::bordered().gray();
 
-    if app.login_change_focus {
-        frame.render_widget(not_focused_block, username_field[1]);
-        frame.render_widget(focused_block, password_field[1]);
-    } else {
-        frame.render_widget(focused_block, username_field[1]);
-        frame.render_widget(not_focused_block, password_field[1]);
+    match state.focused_field {
+        LoginField::Username => {
+            frame.render_widget(focused_block, username_field[1]);
+            frame.render_widget(not_focused_block, password_field[1]);
+        }
+
+        LoginField::Password => {
+            frame.render_widget(not_focused_block, username_field[1]);
+            frame.render_widget(focused_block, password_field[1]);
+        }
     }
 
     let paragraph = Paragraph::new("Password");
@@ -59,7 +65,7 @@ pub fn render_login_screen(app: &mut App, frame: &mut Frame) {
     // frame.render_widget(your_widget, inner_area);
 }
 
-pub fn render_main_screen(app: &mut App, frame: &mut Frame) {
+pub fn render_main_screen(state: &MainState, frame: &mut Frame) {
     let layout = Layout::horizontal([
         Constraint::Percentage(25),
         Constraint::Percentage(60),
@@ -67,7 +73,7 @@ pub fn render_main_screen(app: &mut App, frame: &mut Frame) {
     ])
     .split(frame.area());
 
-    render_left_chunks(app, frame, layout[0]);
+    render_left_chunks(state, frame, layout[0]);
 
     let curr_chat = Block::bordered().title("<Name of chat>");
     frame.render_widget(curr_chat, layout[1]);
@@ -75,47 +81,47 @@ pub fn render_main_screen(app: &mut App, frame: &mut Frame) {
     let emojis = Block::bordered().title("<Emojis>");
     frame.render_widget(emojis, layout[2]);
 
-    if !app.connection_available {
-        render_connection_unavailable(frame);
-    }
+    // if !state.connection_available {
+    //     render_connection_unavailable(frame);
+    // }
 
     // let text = Text::from(Line::from(app.in_buf.as_str()));
     // frame.render_widget(text, frame.area());
 }
 
-fn render_left_chunks(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_left_chunks(state: &MainState, frame: &mut Frame, area: Rect) {
     let chunks = Layout::vertical([Constraint::Percentage(5), Constraint::Percentage(95)])
         // .spacing(-1)
         .split(area);
 
-    render_user(app, frame, chunks[0]);
+    render_user(state, frame, chunks[0]);
 
     let chats = Block::bordered().title("Chats");
     frame.render_widget(chats, chunks[1]);
 }
 
-fn render_user(app: &mut App, frame: &mut Frame, rect: Rect) {
+fn render_user(state: &MainState, frame: &mut Frame, rect: Rect) {
     let block = Block::bordered();
-    let username_text = format!("Logged in as {}", app.username);
+    let username_text = format!("Logged in as {}", "lol");
     let username = Paragraph::new(username_text).block(block);
     frame.render_widget(username, rect);
 }
 
 // pub fn render_input_screen(fields: [&str; N]) {}
 
-fn render_box_with_fields(app: &mut App, frame: &mut Frame) {
-    frame.render_widget(Clear, frame.area());
+// fn render_box_with_fields(app: &mut App, frame: &mut Frame) {
+//     frame.render_widget(Clear, frame.area());
 
-    let mut title = "Input".to_string();
-    if !app.log_in && app.register {
-        title = "Register".to_string();
-    } else if app.log_in && !app.register {
-        title = "Log in".to_string()
-    }
+//     let mut title = "Input".to_string();
+//     if !app.log_in && app.register {
+//         title = "Register".to_string();
+//     } else if app.log_in && !app.register {
+//         title = "Log in".to_string()
+//     }
 
-    let input_block = Block::bordered().title(title);
-    frame.render_widget(input_block, frame.area());
-}
+//     let input_block = Block::bordered().title(title);
+//     frame.render_widget(input_block, frame.area());
+// }
 
 // fn draw_first_tab(frame: &mut Frame, app: &mut App, area: Rect) {
 //     let chats = Block::bordered().title("Chats");
