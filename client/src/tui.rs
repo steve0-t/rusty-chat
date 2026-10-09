@@ -47,9 +47,22 @@ impl Tui {
         Ok(())
     }
 
-    /// higher level abstraction over `terminal.draw()`
+    /// high level abstraction over `terminal.draw()`
     pub fn draw(&mut self, app: &mut App) -> Result<()> {
-        self.terminal.draw(|frame| ui::render(app, frame))?;
+        match app.app_state {
+            crate::app::AppState::Main => {
+                self.render_main_screen(app);
+            }
+
+            crate::app::AppState::LogIn => {
+                self.render_login_screen(app);
+            }
+
+            crate::app::AppState::Register => {
+                self.render_register_screen(app);
+            }
+        };
+
         Ok(())
     }
 
@@ -65,5 +78,21 @@ impl Tui {
         Self::reset()?;
         self.terminal.show_cursor()?;
         Ok(())
+    }
+
+    fn render_main_screen(&mut self, app: &mut App) -> Result<()> {
+        self.terminal
+            .draw(|frame| ui::render_main_screen(app, frame))?;
+        Ok(())
+    }
+
+    fn render_login_screen(&mut self, app: &mut App) -> Result<()> {
+        self.terminal
+            .draw(|frame| ui::render_login_screen(app, frame))?;
+        Ok(())
+    }
+
+    fn render_register_screen(&mut self, app: &mut App) -> Result<()> {
+        todo!()
     }
 }
