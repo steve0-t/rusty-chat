@@ -86,8 +86,9 @@ async fn main() -> Result<()> {
     let mut app = app::App::new();
 
     let (sender, mut receiver) = channel::<NetworkingMessages>(5);
+    let (sx_client, mut rx_client) = channel::<NetworkingMessages>(5);
     let networking_thread = thread::spawn(|| {
-        networking_runtime(sender);
+        networking_runtime(sender, rx_client);
     });
     app.connection = app::ConnectionStatus::Connected;
 
@@ -144,7 +145,10 @@ async fn main() -> Result<()> {
 
 /// loop for networking thread
 #[tokio::main]
-async fn networking_runtime(sender: Sender<NetworkingMessages>) {
+async fn networking_runtime(
+    sender: Sender<NetworkingMessages>,
+    receiver: Receiver<NetworkingMessages>,
+) {
     let certs: Vec<_> = CertificateDer::pem_file_iter("certs/rootCA.pem")
         .unwrap()
         .collect();
@@ -173,15 +177,15 @@ async fn networking_runtime(sender: Sender<NetworkingMessages>) {
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
 
+    let (read_handle, write_handle) = match handle_connection(connector.clone()).await {
+        Ok(res) => res,
+        Err(e) => {
+            let _ = sender.send(NetworkingMessages::FailedToConnect).await;
+            return ();
+        }
+    };
+
     loop {
-        // println!("CLient: establishing connection to server...");
-        let (read_handle, write_handle) = match handle_connection(connector.clone()).await {
-            Ok(res) => res,
-            Err(e) => {
-                let _ = sender.send(NetworkingMessages::FailedToConnect).await;
-                return ();
-            }
-        };
         tokio::time::sleep(Duration::from_millis(1500)).await;
     }
 }
