@@ -30,22 +30,17 @@ use tokio_tungstenite::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    app::{ConnectionStatus, LoginField, LoginState, MainState},
+use client::{
+    app::{self, ConnectionStatus, LoginField, LoginState, MainState},
     app_event::{AppEvent, EventHandler},
     tui::Tui,
+    update,
 };
 
 pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
 
 type ReadHandle = JoinHandle<()>;
 type WriteHandle = JoinHandle<()>;
-
-pub mod app;
-pub mod app_event;
-pub mod tui;
-pub mod ui;
-pub mod update;
 
 pub enum RequestData {
     Username = 1,
@@ -330,7 +325,11 @@ async fn request_session(
 // async fn sync_channels() -> Option<Vec<ChannelSelect>> {}
 
 fn get_last_logged_user() -> Option<String> {
-    let mut file = match File::open("users/last_logged_in") {
+    read_last_logged_user("users/last_logged_in")
+}
+
+fn read_last_logged_user(path: impl AsRef<std::path::Path>) -> Option<String> {
+    let mut file = match File::open(path) {
         Ok(res) => res,
         Err(_e) => return None,
     };
@@ -353,3 +352,11 @@ fn poll_networking_messages(receiver: &mut Receiver<NetworkingMessages>, app: &m
         }
     };
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/networking.rs"]
+mod networking_tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/session_files.rs"]
+mod session_file_tests;

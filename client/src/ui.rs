@@ -1,6 +1,5 @@
 use std::{ops::DerefMut, thread::sleep, time::Duration};
 
-use crossterm::style::Stylize;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect, Spacing},
