@@ -102,7 +102,7 @@ pub struct SessionSelect {
     revoked_at: Datetime,
 }
 
-#[derive(Debug, SurrealValue)]
+#[derive(Debug)]
 pub struct AccessToken(String);
 
 pub enum CommandType {
