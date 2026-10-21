@@ -342,7 +342,9 @@ async fn client_loop(
                     }
                     println!("Received from client: {:?}", text);
                 }
+
                 OwnedMessage::Binary(_items) => todo!(),
+
                 OwnedMessage::Close(close_data) => {
                     match close_data {
                         Some(close_data) => {
@@ -352,7 +354,9 @@ async fn client_loop(
                     }
                     return Ok(());
                 }
+
                 OwnedMessage::Ping(_items) => todo!(),
+
                 OwnedMessage::Pong(_items) => todo!(),
             },
 
