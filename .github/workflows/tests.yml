@@ -1,0 +1,102 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_BUILD_JOBS: 2
+  RUST_BACKTRACE: 1
+  # Match the toolchain used to validate the suites locally.
+  RUST_TOOLCHAIN: 1.95.0
+
+jobs:
+  workspace-tests:
+    name: ${{ matrix.package }} tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [client, server]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libssl-dev
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.package }}
+          cache-on-failure: true
+      - name: Run tests
+        run: bash bin/test.sh "${{ matrix.package }}"
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}-test-log
+          path: target/test-results/${{ matrix.package }}.log
+          if-no-files-found: warn
+
+  database-tests:
+    name: Server database tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SURREAL_TEST_ENDPOINT: ws://127.0.0.1:8000
+      SURREAL_TEST_USERNAME: root
+      SURREAL_TEST_PASSWORD: root
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libssl-dev
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-database
+          cache-on-failure: true
+      - name: Start isolated SurrealDB
+        run: |
+          # Match the SDK version resolved in Cargo.lock. Store nothing on disk.
+          docker run --detach --name chat-app-test-db \
+            --publish 127.0.0.1:8000:8000 \
+            surrealdb/surrealdb:v3.2.0 \
+            start --bind 0.0.0.0:8000 --user root --pass root memory
+          for attempt in {1..60}; do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:8000/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs chat-app-test-db
+          exit 1
+      - name: Run database tests
+        run: bash bin/test.sh database
+      - name: Save database log
+        if: always()
+        run: |
+          mkdir -p target/test-results
+          docker logs chat-app-test-db > target/test-results/surrealdb.log 2>&1 || true
+      - name: Upload database test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-test-logs
+          path: |
+            target/test-results/database.log
+            target/test-results/surrealdb.log
+          if-no-files-found: warn
+      - name: Stop SurrealDB
+        if: always()
+        run: docker rm --force chat-app-test-db || true
