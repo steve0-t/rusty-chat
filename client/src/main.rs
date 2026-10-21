@@ -117,6 +117,7 @@ async fn main() -> Result<()> {
                 username: String::with_capacity(128),
                 password: String::with_capacity(128),
                 focused_field: LoginField::Username,
+                show_password: false,
                 message: None,
             });
         }
@@ -132,8 +133,17 @@ async fn main() -> Result<()> {
         // Handle events.
         match tui.events.next()? {
             AppEvent::Tick => {}
-            AppEvent::Key(key_event) => update::update(&mut app, key_event),
+
+            AppEvent::Key(key_event) => {
+                if let Some(event) = update::update(&mut app, key_event) {
+                    match event {
+                        app::AppCommand::LogIn => {}
+                    }
+                }
+            }
+
             AppEvent::Mouse(_) => {}
+
             AppEvent::Resize(new_x, new_y) => {}
         };
     }

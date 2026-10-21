@@ -3,7 +3,13 @@ pub struct App {
     pub should_quit: bool,
     pub connection: ConnectionStatus,
     pub screen: Screen,
+    // pub app_event: AppEvent,
     // pub username: String,
+}
+
+#[derive(Debug)]
+pub enum AppCommand {
+    LogIn,
 }
 
 #[derive(Debug)]
@@ -52,6 +58,7 @@ pub struct LoginState {
     pub username: String,
     pub password: String,
     pub focused_field: LoginField,
+    pub show_password: bool,
     pub message: Option<String>,
 }
 

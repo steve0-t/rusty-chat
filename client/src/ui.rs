@@ -1,11 +1,15 @@
 use std::{ops::DerefMut, thread::sleep, time::Duration};
 
+use crossterm::style::Stylize;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect, Spacing},
-    style::{Color, Style, Stylize},
+    style::{
+        Color::{self, Gray, Yellow},
+        Style, Stylize,
+    },
     text::{Line, Text},
-    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, canvas::Label},
 };
 
 use crate::app::{App, LoginField, LoginState, MainState, Screen};
@@ -15,47 +19,65 @@ pub fn render_loading_screen(frame: &mut Frame) {}
 pub fn render_login_screen(state: &LoginState, frame: &mut Frame) {
     let centered_area = frame
         .area()
-        .centered(Constraint::Percentage(20), Constraint::Percentage(30));
+        .centered(Constraint::Max(75), Constraint::Percentage(20));
+
+    let centered_chunks =
+        Layout::vertical([Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(centered_area);
     frame.render_widget(Clear, centered_area);
 
-    let popup_block = Block::bordered().title("Log in");
+    let instructions = Line::from(vec![
+        " Change focus ".into(),
+        "<Tab>".yellow().bold(),
+        " Show password ".into(),
+        "<Space>".yellow().bold(),
+        " Submit ".into(),
+        "<Enter>".green().bold(),
+        " Quit ".into(),
+        "<Esc> ".red().bold(),
+    ])
+    .centered();
 
-    let inner_area = popup_block.inner(centered_area);
+    frame.render_widget(instructions, centered_chunks[1]);
+
+    let title = Line::from(" Log in ".bold());
+    let popup_block = Block::bordered().title_top(title.centered());
+
+    let inner_area = popup_block.inner(centered_chunks[0]);
     let chunks = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner_area);
 
-    // render username input field with title
-    let username_field =
-        Layout::vertical([Constraint::Percentage(10), Constraint::Percentage(90)]).split(chunks[0]);
+    let username_to_render = if state.username.len() > chunks[0].width as usize {
+        state.username.get(state.username.len()..).unwrap()
+    } else {
+        state.username.as_str()
+    };
 
-    // render password input field with title
-    let password_field =
-        Layout::vertical([Constraint::Percentage(10), Constraint::Percentage(90)]).split(chunks[1]);
+    let actual_username = Paragraph::new(username_to_render).block(match state.focused_field {
+        LoginField::Username => Block::bordered().title("Username").border_style(Yellow),
+        LoginField::Password => Block::bordered().title("Username").border_style(Gray),
+    });
 
-    let paragraph = Paragraph::new("Username");
-    frame.render_widget(paragraph, username_field[0]);
+    frame.render_widget(actual_username, chunks[0]);
 
-    let focused_block = Block::bordered().yellow();
-
-    let not_focused_block = Block::bordered().gray();
-
-    match state.focused_field {
-        LoginField::Username => {
-            frame.render_widget(focused_block, username_field[1]);
-            frame.render_widget(not_focused_block, password_field[1]);
+    let pswd_to_display = match state.show_password {
+        true => state.password.as_str(),
+        false => {
+            let res = &"*".repeat(state.password.len());
+            // res.as_str()
+            &res.to_string()
         }
+    };
 
-        LoginField::Password => {
-            frame.render_widget(not_focused_block, username_field[1]);
-            frame.render_widget(focused_block, password_field[1]);
-        }
-    }
+    let actual_password = Paragraph::new(pswd_to_display).block(match state.focused_field {
+        LoginField::Username => Block::bordered().title("Password").border_style(Gray),
+        LoginField::Password => Block::bordered().title("Password").border_style(Yellow),
+    });
 
-    let paragraph = Paragraph::new("Password");
-    frame.render_widget(paragraph, password_field[0]);
+    frame.render_widget(actual_password, chunks[1]);
 
     // render the input field container
-    frame.render_widget(popup_block, centered_area);
+    frame.render_widget(popup_block, centered_chunks[0]);
 
     // let paragraph = Paragraph::new("Password").block(popup_block);
     // frame.render_widget(paragraph, centered_area);
