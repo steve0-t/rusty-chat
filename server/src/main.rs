@@ -416,14 +416,6 @@ async fn auth_client(
     db: &Surreal<Any>,
     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
 ) -> Option<String> {
-    send_msg_to_client(
-        &"
-            1. Log in
-            2. Register
-        "
-        .to_string(),
-        client,
-    );
     let method = client.recv_message().ok()?;
     let OwnedMessage::Text(method) = method else {
         return None;
@@ -506,19 +498,115 @@ fn send_msg_to_client(
     let _ = client.send_message(&Message::text(msg));
 }
 
-fn get_input_from_user<const N: usize>(
-    client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
-    input_prompts: [&str; N],
-) -> Result<[OwnedMessage; N]> {
-    let mut ret: Vec<OwnedMessage> = Vec::with_capacity(N);
+// fn get_input_from_user<const N: usize>(
+//     client: &mut websocket::client::sync::Client<TlsStream<TcpStream>>,
+//     input_prompts: [&str; N],
+// ) -> Result<[OwnedMessage; N]> {
+//     let mut ret: Vec<OwnedMessage> = Vec::with_capacity(N);
 
-    for i in 0..input_prompts.len() {
-        send_msg_to_client(input_prompts[i], client);
-        ret.push(client.recv_message()?);
-    }
+//     for i in 0..input_prompts.len() {
+//         send_msg_to_client(input_prompts[i], client);
+//         ret.push(client.recv_message()?);
+//     }
 
-    Ok(ret
-        .try_into()
-        .map_err(|_| anyhow!("Error: could not convert to array"))
-        .unwrap())
+//     Ok(ret
+//         .try_into()
+//         .map_err(|_| anyhow!("Error: could not convert to array"))
+//         .unwrap())
+// }
+
+async fn log_in() -> Option<String> {
+    // let (OwnedMessage::Text(username), OwnedMessage::Text(pswd)) = (username, pswd) else {
+    //     return None;
+    // };
+
+    // // println!("{username} {pswd}");
+    // // println!("getting user by username");
+
+    // // let user = get_user::<UserInsert>(&username, db).await;
+
+    // // println!("verifying user");
+    // if let Some(user) = user {
+    //     let Ok(pswd_hash) = PasswordHash::new(&user.password) else {
+    //         return None;
+    //     };
+
+    //     let argon2 = Argon2::default();
+
+    //     match argon2.verify_password(&pswd.into_bytes(), &pswd_hash) {
+    //         Ok(_) => Some(user.username),
+    //         Err(e) => {
+    //             eprintln!("Failed to verify user: {e:?}");
+    //             None
+    //         }
+    //     }
+    // } else {
+    //     eprintln!("Server: failed to fetch user");
+    //     None
+    // }
+    None
+}
+
+async fn register() -> Option<String> {
+    // let (OwnedMessage::Text(username), OwnedMessage::Text(pswd), OwnedMessage::Text(repeat_pswd)) =
+    //     (username, pswd, repeat_pswd)
+    // else {
+    //     return None;
+    // };
+
+    // if pswd.len() != repeat_pswd.len() || pswd != repeat_pswd {
+    //     send_msg_to_client(&"Entered passwords do not match".to_string(), client);
+    //     return None;
+    // }
+
+    // // let user = get_user::<UserSelect>(&username, db).await;
+
+    // match user {
+    //     Some(_) => {
+    //         let _ = send_msg_to_client(&"User '{username}' already exists".to_string(), client);
+    //         return None;
+    //     }
+    //     None => {}
+    // };
+
+    // send_msg_to_client(&"Enter phone number (optional): ".to_string(), client);
+    // let phone_number = match client.recv_message().ok()? {
+    //     OwnedMessage::Text(text) => Some(text),
+    //     _ => None,
+    // };
+
+    // send_msg_to_client(&"Enter email address (optional): ".to_string(), client);
+    // let email_addr = match client.recv_message().ok()? {
+    //     OwnedMessage::Text(text) => Some(text),
+    //     _ => None,
+    // };
+
+    // let salt = SaltString::generate(&mut OsRng);
+
+    // let argon2 = Argon2::default();
+
+    // let hashed_pass = argon2
+    //     .hash_password(&pswd.into_bytes(), &salt)
+    //     .ok()?
+    //     .to_string();
+
+    // match db
+    //     .insert::<Option<UserSelect>>(("users", Uuid::new_v7()))
+    //     .content(UserInsert {
+    //         username: username,
+    //         password: hashed_pass,
+    //         created_at: Datetime::now(),
+    //         phone_number: phone_number,
+    //         email_addr: email_addr,
+    //     })
+    //     .await
+    // {
+    //     Ok(user) => user.map(|u| u.username),
+
+    //     Err(e) => {
+    //         eprintln!("Failed to register user: {e:?}");
+    //         None
+    //     }
+    // }
+    None
 }
