@@ -1,3 +1,4 @@
+//! Initially generated with AI assistance on 2026-10-21.
 //! Desired behavior for known unfinished paths. These tests intentionally remain
 //! enabled so the pipeline reports the gaps until the implementation catches up.
 mod support;

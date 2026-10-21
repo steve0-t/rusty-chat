@@ -1,5 +1,7 @@
 # Server tests
 
+The initial test suite was generated with AI assistance on 2026-10-21.
+
 Run from the repository root:
 
 ```sh

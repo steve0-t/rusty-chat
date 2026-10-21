@@ -1,3 +1,5 @@
+//! Initially generated with AI assistance on 2026-10-21.
+//!
 //! Opt-in contracts against a disposable SurrealDB 3.2 server.
 //!
 //! Each case owns its own random namespace. Production namespace/database

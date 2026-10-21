@@ -1,5 +1,7 @@
 # Client tests
 
+The initial test suite was generated with AI assistance on 2026-10-21.
+
 From `client/`, run every client target even when an earlier target fails:
 
 ```sh

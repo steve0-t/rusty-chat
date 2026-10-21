@@ -1,3 +1,5 @@
+//! Initially generated with AI assistance on 2026-10-21.
+
 use crate::CommandType;
 
 macro_rules! command_case {

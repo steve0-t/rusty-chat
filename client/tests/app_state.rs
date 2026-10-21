@@ -1,3 +1,4 @@
+//! Initially generated with AI assistance on 2026-10-21.
 mod support;
 
 use client::{

@@ -1,3 +1,5 @@
+//! Initially generated with AI assistance on 2026-10-21.
+
 use surrealdb_types::Object;
 
 use crate::{

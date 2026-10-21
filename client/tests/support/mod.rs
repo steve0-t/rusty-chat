@@ -1,3 +1,4 @@
+//! Initially generated with AI assistance on 2026-10-21.
 #![allow(dead_code)]
 
 use client::app::{App, ConnectionStatus, LoginField, LoginState, Screen};

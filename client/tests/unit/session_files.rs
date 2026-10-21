@@ -1,3 +1,4 @@
+//! Initially generated with AI assistance on 2026-10-21.
 use super::read_last_logged_user;
 use std::{
     fs,

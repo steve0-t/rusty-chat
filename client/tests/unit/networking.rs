@@ -1,3 +1,4 @@
+//! Initially generated with AI assistance on 2026-10-21.
 use super::*;
 use tokio::net::TcpListener;
 

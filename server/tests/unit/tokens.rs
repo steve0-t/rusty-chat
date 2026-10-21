@@ -1,3 +1,5 @@
+//! Initially generated with AI assistance on 2026-10-21.
+
 use std::collections::HashSet;
 
 use crate::{generate_access_token, hash_token};

@@ -1,3 +1,5 @@
+//! Initially generated with AI assistance on 2026-10-21.
+
 use surrealdb::{Surreal, engine::any::Any};
 
 use crate::{RecordId, UserSelect, display_channels, get_user, open_channel};
