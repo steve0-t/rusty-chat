@@ -47,6 +47,10 @@ use surrealdb_types::{RecordId, SurrealValue, Value, uuid};
 
 use anyhow::{Error, Result, anyhow};
 
+#[cfg(test)]
+#[path = "../tests/unit/mod.rs"]
+mod tests;
+
 #[derive(Debug, SurrealValue)]
 pub struct ChannelInsert {
     channel_name: String,

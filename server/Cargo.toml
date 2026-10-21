@@ -3,6 +3,10 @@ name = "server"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Requires a separately running, disposable SurrealDB server.
+db-tests = []
+
 [dependencies]
 websocket = { version = "0.27.1", features = ["async", "async-ssl", "bytes", "futures", "native-tls", "sync", "sync-ssl"] }
 surrealdb = { version = "3.1.5" }
