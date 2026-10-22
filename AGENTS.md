@@ -44,3 +44,15 @@ Create an adjacent `<filename>.ai-provenance.md` sidecar identifying the file an
 Preserve existing markers and update their boundaries when marked code moves or changes. Avoid redundant or nested markers. Human review alone does not remove AI provenance.
 
 Keep third-party attribution and license notices intact. Do not describe ordinary compiler or dependency-manager output as AI-authored solely because AI ran the tool.
+
+## Commit completed work
+
+- After completing an implementation task, including tests or documentation changes, use the `commit-changes` skill to review and commit changes belonging to that task.
+- This is standing authorization to create local commits without asking for confirmation. Follow any narrower instructions given for the current task.
+- Follow the skill's guidance for logical commit boundaries, accurate messages, validation, and final reporting.
+- Include required AI attribution markers in the commits.
+- Preserve unrelated staged and unstaged changes. Use explicit paths or selected hunks so existing work is not accidentally included.
+- If task changes cannot safely be separated from existing work, leave them uncommitted and explain the blocker.
+- If the skill is unavailable or required checks or hooks fail, preserve the work and report the blocker. Do not bypass hooks.
+- Do not push, open pull requests, amend commits, or rewrite history unless explicitly requested.
+- Planning, review-only, and message-only requests do not trigger commits.
