@@ -1,4 +1,5 @@
 //! Initially generated with AI assistance on 2026-10-21.
+//! Extended with AI assistance on 2026-10-22.
 
 use surrealdb_types::Object;
 
@@ -162,6 +163,22 @@ fn active_sessions_can_be_loaded_without_a_revocation_timestamp() {
     // revocation date merely to decode its database record.
     let value = replace(session().into_value(), "revoked_at", Value::None);
     assert!(SessionSelect::from_value(value).is_ok());
+}
+
+#[test]
+fn active_sessions_can_be_loaded_when_revoked_at_is_absent() {
+    let mut object = as_object(session().into_value());
+    object.remove("revoked_at");
+    assert!(SessionSelect::from_value(Value::Object(object)).is_ok());
+}
+
+#[test]
+fn debug_output_redacts_stored_password_hashes() {
+    let user = user_insert("alice");
+    assert!(
+        !format!("{user:?}").contains(&user.password),
+        "credential records must not disclose password hashes in debug logs"
+    );
 }
 
 #[test]

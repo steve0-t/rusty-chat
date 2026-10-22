@@ -1,4 +1,5 @@
 //! Initially generated with AI assistance on 2026-10-21.
+//! Extended with AI assistance on 2026-10-22.
 use super::read_last_logged_user;
 use std::{
     fs,
@@ -129,4 +130,42 @@ fn regression_empty_session_file_does_not_select_an_empty_database_name() {
     let fixture = SessionFileFixture::new();
     fixture.write("");
     assert_eq!(read_last_logged_user(fixture.path()), None);
+}
+
+#[test]
+fn whitespace_only_session_files_do_not_select_a_database() {
+    let fixture = SessionFileFixture::new();
+    for contents in [" ", "\t\r\n", "\u{2003}"] {
+        fixture.write(contents);
+        assert_eq!(
+            read_last_logged_user(fixture.path()),
+            None,
+            "contents: {contents:?}"
+        );
+    }
+}
+
+#[test]
+fn session_files_with_control_characters_are_rejected_without_trimming() {
+    let fixture = SessionFileFixture::new();
+    for contents in ["alice\n", "alice\r\nbob", "alice\0bob", "\u{1b}alice"] {
+        fixture.write(contents);
+        assert_eq!(
+            read_last_logged_user(fixture.path()),
+            None,
+            "contents: {contents:?}"
+        );
+    }
+}
+
+#[test]
+fn replacing_a_corrupt_session_file_with_a_valid_one_recovers() {
+    let fixture = SessionFileFixture::new();
+    fixture.write([0xff]);
+    assert_eq!(read_last_logged_user(fixture.path()), None);
+    fixture.write("alice");
+    assert_eq!(
+        read_last_logged_user(fixture.path()).as_deref(),
+        Some("alice")
+    );
 }

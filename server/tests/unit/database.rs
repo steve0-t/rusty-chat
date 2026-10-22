@@ -1,4 +1,5 @@
 //! Initially generated with AI assistance on 2026-10-21.
+//! Extended with AI assistance on 2026-10-22.
 //!
 //! Opt-in contracts against a disposable SurrealDB 3.2 server.
 //!
@@ -13,6 +14,9 @@ use tokio::time::timeout;
 
 use super::models::{channel_insert, message, timestamp, user_insert};
 use crate::{ChannelSelect, MessageType, RecordId, SurrealValue, UserSelect, Value};
+
+#[path = "database_upcoming.rs"]
+mod upcoming;
 
 struct Database {
     db: Surreal<Any>,

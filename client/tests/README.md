@@ -1,6 +1,8 @@
 # Client tests
 
 The initial test suite was generated with AI assistance on 2026-10-21.
+The test extensions and documentation updates were generated with AI assistance
+on 2026-10-22.
 
 From `client/`, run every client target even when an earlier target fails:
 
@@ -15,7 +17,7 @@ From the repository root, the pipeline wrapper also saves the output in
 bash bin/test.sh client
 ```
 
-The suite has 94 tests. Tests live in this workspace; the files under `unit/`
+The suite has 116 tests. Tests live in this workspace; the files under `unit/`
 are included by the binary to reach its private networking and file helpers.
 The public application modules are available through `client/src/lib.rs`.
 
@@ -25,8 +27,9 @@ The public application modules are available through `client/src/lib.rs`.
 | `login_input.rs` | Field focus, keyboard entry, Unicode, byte capacity, backspace, visibility, validation, login commands, irrelevant navigation |
 | `rendering.rs` | Headless Ratatui rendering, labels, shortcuts, masking, focus colors, Unicode, repeated draws, zero/tiny/normal terminal sizes |
 | `regressions.rs` | Enabled specifications for unfinished input and rendering behavior |
-| `unit/networking.rs` | Networking channel events, worker shutdown, WebSocket session-token transport and errors |
-| `unit/session_files.rs` | Session-file reads, missing/invalid/deleted files, Unicode, isolation, empty-file validation |
+| `upcoming_features.rs` | Proposed composer behavior, offline draft preservation, navigation, login feedback/privacy, password redraw, draft rendering after resize |
+| `unit/networking.rs` | Networking channel events, worker shutdown, draft preservation, WebSocket session-token transport, session requests and errors |
+| `unit/session_files.rs` | Session-file reads, missing/invalid/deleted files, Unicode, isolation, empty/whitespace/control-character validation, recovery after corruption |
 
 Tests use Ratatui's `TestBackend`, unique temporary directories, Tokio channels,
 and temporary WebSocket servers bound to `127.0.0.1:0`. The network operations
@@ -39,8 +42,9 @@ directory or environment changes are needed.
 ## Known failures
 
 Desired-behavior tests remain enabled. They use ordinary assertions and do not
-mark panics as success. The initial full run reports **76 passing / 18 failing**
-tests, with no ignored cases. These failures expose the following gaps:
+mark panics as success. The expanded run on 2026-10-22 reports **79 passing /
+37 failing** tests, with no ignored cases (Rust 1.95.0). These failures expose
+the following gaps:
 
 - `regressions.rs`: UTF-8 input can grow past the byte capacity; stale validation
   errors survive successful submission; control/Alt shortcuts and raw control
@@ -48,8 +52,17 @@ tests, with no ignored cases. These failures expose the following gaps:
   screen typing/backspace/navigation panic; errors and drafts are not rendered;
   long usernames disappear; Unicode password masks use byte counts; loading has
   no visible feedback.
-- `unit/networking.rs`: closing the networking channel leaves a Connected status.
-- `unit/session_files.rs`: an empty last-user file selects an empty database name.
+- `upcoming_features.rs`: the composer handler panics for input, navigation, and
+  submission; drafts are not rendered after resize; editing leaves stale login
+  errors; submission leaves revealed passwords visible; Debug exposes passwords.
+  The repeated-frame password-hiding contract already passes.
+- `unit/networking.rs`: closing the networking channel leaves a Connected or
+  Connecting status; `request_session` returns success without sending a request
+  and also succeeds on a closed socket. Connection-failure draft preservation
+  already passes.
+- `unit/session_files.rs`: empty, whitespace-only, and control-containing saved
+  identities are accepted as database names. Recovery after replacing a corrupt
+  file already passes.
 
 These failures make the pipeline useful as a backlog. Implement the behavior
 when ready and keep the assertions. To focus on implemented behavior while
@@ -62,6 +75,19 @@ cargo test --test rendering
 cargo test --bin client restore_session
 ```
 
-The WebSocket tests verify the existing token frame transport. They do not
+Run the new UI contracts independently with:
+
+```sh
+cargo test --locked -p client --test upcoming_features
+```
+
+The extension adds 22 cases: 15 UI contracts, four networking cases, and three
+session-file cases. Three pass today and 19 expose unfinished behavior. The
+[acceptance scenarios](../../docs/acceptance-scenarios.md) explain the proposed
+policies and list further workflows that cannot be exercised until application
+APIs exist. Those written scenarios are not counted as automated tests.
+
+The WebSocket tests verify token frame transport and specify session-request
+transport behavior without fixing the future request payload format. They do not
 claim to verify server authentication, certificate trust, credential storage,
 or a completed login flow, which are not wired into the client yet.

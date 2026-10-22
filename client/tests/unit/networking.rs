@@ -1,4 +1,5 @@
 //! Initially generated with AI assistance on 2026-10-21.
+//! Extended with AI assistance on 2026-10-22.
 use super::*;
 use tokio::net::TcpListener;
 
@@ -205,4 +206,78 @@ async fn restore_session_propagates_a_closed_websocket_error() {
     .await
     .expect("closed WebSocket write timed out");
     assert!(result.is_err());
+}
+
+#[test]
+fn connection_loss_preserves_an_unsent_message_draft() {
+    let (sender, mut receiver) = channel(5);
+    let mut app = app::App::new();
+    app.connection = ConnectionStatus::Connected;
+    app.screen = app::Screen::Main(MainState {
+        input: "unsent 🦀 message".into(),
+    });
+    sender
+        .try_send(NetworkingMessages::FailedToConnect)
+        .unwrap();
+    poll_networking_messages(&mut receiver, &mut app);
+    assert!(matches!(app.connection, ConnectionStatus::Disconnected));
+    let app::Screen::Main(state) = &app.screen else {
+        panic!("connection loss must leave the draft accessible");
+    };
+    assert_eq!(state.input, "unsent 🦀 message");
+    assert!(!app.should_quit);
+}
+
+#[test]
+fn worker_shutdown_while_connecting_leaves_the_draft_available_offline() {
+    let (sender, mut receiver) = channel::<NetworkingMessages>(5);
+    let mut app = app::App::new();
+    app.connection = ConnectionStatus::Connecting;
+    app.screen = app::Screen::Main(MainState {
+        input: "retry later".into(),
+    });
+    drop(sender);
+    poll_networking_messages(&mut receiver, &mut app);
+    assert!(matches!(app.connection, ConnectionStatus::Disconnected));
+    let app::Screen::Main(state) = &app.screen else {
+        panic!("worker shutdown must preserve the main screen");
+    };
+    assert_eq!(state.input, "retry later");
+    assert!(!app.should_quit);
+}
+
+#[tokio::test]
+async fn requesting_a_session_sends_a_nonempty_text_request() {
+    let (client, mut server) = websocket_pair().await;
+    let (mut write, _read) = client.split();
+    // Pin only observable transport behavior until the auth protocol is defined.
+    // Returning Ok without sending anything must not count as a session request.
+    timeout(NETWORK_TIMEOUT, request_session(&mut write))
+        .await
+        .expect("session request timed out")
+        .expect("session request failed");
+    let frame = timeout(NETWORK_TIMEOUT, server.next())
+        .await
+        .expect("request_session returned without sending a request")
+        .expect("client disconnected")
+        .expect("read session request");
+    assert!(frame.is_text());
+    assert!(!frame.into_text().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn requesting_a_session_propagates_a_closed_websocket_error() {
+    let (client, _server) = websocket_pair().await;
+    let (mut write, _read) = client.split();
+    timeout(NETWORK_TIMEOUT, write.close())
+        .await
+        .unwrap()
+        .unwrap();
+    let result = timeout(NETWORK_TIMEOUT, request_session(&mut write))
+        .await
+        .expect("session request timed out");
+    assert!(
+        result.is_err(),
+        "a closed transport cannot successfully request a session"
+    );
 }
