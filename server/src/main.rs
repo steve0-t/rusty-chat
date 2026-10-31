@@ -130,38 +130,24 @@ impl TryFrom<u32> for CommandType {
 }
 
 pub const SERVER_IP: &str = "wss://127.0.0.1:9090";
+const DB_ADDR: &str = "ws://localhost:8000";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut cert_file = match File::open("certs/rustychat.com+4.pem") {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Could not open certificate file: {e:?}");
-            return Err(e.into());
-        }
-    };
+    let mut cert_file = File::open("certs/rustychat.com+4.pem")
+        .map_err(|e| anyhow!("Could not open certificate file: {e:?}"))?;
 
     let mut cert_buf = vec![];
     cert_file.read_to_end(&mut cert_buf)?;
 
-    let mut cert_key_file = match File::open("certs/rustychat.com+4-key.pem") {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Could not open certificate key file: {e:?}");
-            return Err(e.into());
-        }
-    };
+    let mut cert_key_file = File::open("certs/rustychat.com+4-key.pem")
+        .map_err(|e| anyhow!("Could not open certificate key file: {e:?}"))?;
 
     let mut cert_key = vec![];
     cert_key_file.read_to_end(&mut cert_key)?;
 
-    let ident = match Identity::from_pkcs8(&cert_buf, &cert_key) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Failed to load certificate: {e:?}");
-            return Err(e.into());
-        }
-    };
+    let ident = Identity::from_pkcs8(&cert_buf, &cert_key)
+        .map_err(|e| anyhow!("Failed to load certificate: {e:?}"))?;
 
     let tls_acceptor = TlsAcceptor::builder(ident)
         .build()
@@ -169,7 +155,7 @@ async fn main() -> Result<()> {
 
     let db = timeout(
         Duration::from_secs(5),
-        surrealdb::engine::any::connect("ws://localhost:8000"),
+        surrealdb::engine::any::connect(DB_ADDR),
     )
     .await??;
 
@@ -182,16 +168,9 @@ async fn main() -> Result<()> {
     db.use_ns("chat_app").use_db("production").await?;
 
     let addr = SERVER_IP;
-    let mut server = match Server::bind_secure(&addr, tls_acceptor) {
-        Ok(server) => {
-            println!("Server: Ready! Listening on {addr}");
-            server
-        }
-        Err(e) => {
-            eprintln!("Failed to bind server: {e:?}");
-            return Err(e.into());
-        }
-    };
+    let mut server = Server::bind_secure(&addr, tls_acceptor)
+        .map_err(|e| anyhow!("Failed to bind server: {e:?}"))?;
+    println!("Server: Ready! Listening on {addr}");
 
     deploy_server(&mut server, &db).await
 }
