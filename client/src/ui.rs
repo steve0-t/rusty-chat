@@ -46,11 +46,20 @@ pub fn render_login_screen(state: &LoginState, frame: &mut Frame) {
     let chunks = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner_area);
 
-    let username_to_render = if state.username.len() > chunks[0].width as usize {
-        state.username.get(state.username.len()..).unwrap()
+    let username_box_width = chunks[0].width as usize;
+    let username_to_render = if state.username.len() > username_box_width - 3 {
+        let index = state.username.len() - (username_box_width - 3);
+        state
+            .username
+            .get(index..)
+            .map_or(state.username.as_str(), |res| res)
+        // .unwrap_or(state.username.as_str())
     } else {
         state.username.as_str()
     };
+
+    // let available_wdith = chunks[0].inner();
+    // let username_to_render = state.username.get(i);
 
     let actual_username = Paragraph::new(username_to_render).block(match state.focused_field {
         LoginField::Username => Block::bordered().title("Username").border_style(Yellow),
@@ -59,8 +68,21 @@ pub fn render_login_screen(state: &LoginState, frame: &mut Frame) {
 
     frame.render_widget(actual_username, chunks[0]);
 
-    let pswd_to_display = match state.show_password {
-        true => state.password.as_str(),
+    let pswd_to_render = match state.show_password {
+        true => {
+            let pswd_box_width = chunks[1].width as usize;
+            let res = if state.password.len() > pswd_box_width - 3 {
+                let index = state.password.len() - (pswd_box_width - 3);
+                state
+                    .password
+                    .get(index..)
+                    .map_or(state.password.as_str(), |res| res)
+                // .unwrap_or(state.username.as_str())
+            } else {
+                state.password.as_str()
+            };
+            res
+        }
         false => {
             let res = &"*".repeat(state.password.len());
             // res.as_str()
@@ -68,7 +90,7 @@ pub fn render_login_screen(state: &LoginState, frame: &mut Frame) {
         }
     };
 
-    let actual_password = Paragraph::new(pswd_to_display).block(match state.focused_field {
+    let actual_password = Paragraph::new(pswd_to_render).block(match state.focused_field {
         LoginField::Username => Block::bordered().title("Password").border_style(Gray),
         LoginField::Password => Block::bordered().title("Password").border_style(Yellow),
     });
