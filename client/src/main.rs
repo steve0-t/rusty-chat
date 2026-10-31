@@ -9,6 +9,10 @@ use std::{
 
 use anyhow::Result;
 
+use futures_util::{
+    SinkExt, StreamExt,
+    stream::{SplitSink, SplitStream},
+};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use secret_service::SecretService;
 use surrealdb::{Surreal, engine::any::Any};
@@ -23,7 +27,6 @@ use tokio_rustls::rustls::{
     pki_types::{CertificateDer, pem::PemObject},
 };
 
-use futures_util::{self, SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
 use tokio_tungstenite::{
     Connector, MaybeTlsStream, WebSocketStream,
     tungstenite::{Message, Utf8Bytes},
@@ -31,7 +34,7 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 
 use client::{
-    app::{self, ConnectionStatus, LoginField, LoginState, MainState},
+    app::{self, AppCommand, ConnectionStatus, LoginField, LoginState, MainState},
     app_event::{AppEvent, EventHandler},
     tui::Tui,
     update,
@@ -48,6 +51,12 @@ pub enum RequestData {
 
 enum NetworkingMessages {
     FailedToConnect = 1,
+    FailedToSendAuth = 2,
+    FailedToReceiveMessage = 3,
+}
+
+enum NetworkCommand {
+    LogIn { username: String, pswd: String },
 }
 
 // impl TryFrom<isize> for NetworkingMessages {
@@ -57,7 +66,6 @@ enum NetworkingMessages {
 //             _ => Err("Failed to convert value".to_string()),
 //         }
 //     }
-
 //     type Error = String;
 // }
 
@@ -81,7 +89,7 @@ async fn main() -> Result<()> {
     let mut app = app::App::new();
 
     let (sender, mut receiver) = channel::<NetworkingMessages>(5);
-    let (sx_client, mut rx_client) = channel::<NetworkingMessages>(5);
+    let (sx_client, mut rx_client) = channel::<NetworkCommand>(5);
     let networking_thread = thread::spawn(|| {
         networking_runtime(sender, rx_client);
     });
@@ -132,7 +140,21 @@ async fn main() -> Result<()> {
             AppEvent::Key(key_event) => {
                 if let Some(event) = update::update(&mut app, key_event) {
                     match event {
-                        app::AppCommand::LogIn => {}
+                        app::AppCommand::LogIn => {
+                            match app.screen {
+                                app::Screen::LogIn(ref login_state) => {
+                                    let cmd = NetworkCommand::LogIn {
+                                        username: login_state.username.clone(),
+                                        pswd: login_state.password.clone(),
+                                    };
+                                    if sx_client.send(cmd).await.is_err() {
+                                        app.connection = ConnectionStatus::Disconnected;
+                                    }
+                                }
+                                _ => {}
+                            };
+                            ()
+                        }
                     }
                 }
             }
@@ -152,7 +174,7 @@ async fn main() -> Result<()> {
 #[tokio::main]
 async fn networking_runtime(
     sender: Sender<NetworkingMessages>,
-    receiver: Receiver<NetworkingMessages>,
+    mut receiver: Receiver<NetworkCommand>,
 ) {
     let certs: Vec<_> = CertificateDer::pem_file_iter("certs/rootCA.pem")
         .unwrap()
@@ -182,72 +204,53 @@ async fn networking_runtime(
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(config));
 
-    let (read_handle, write_handle) = match handle_connection(connector.clone()).await {
-        Ok(res) => res,
-        Err(e) => {
-            let _ = sender.send(NetworkingMessages::FailedToConnect).await;
-            return ();
-        }
+    let mut read_buf = String::with_capacity(512);
+    let mut write_buf = String::with_capacity(512);
+
+    let Ok(ws_stream) = establish_ws_connection(connector).await else {
+        let _ = sender.send(NetworkingMessages::FailedToConnect).await;
+        return;
     };
 
-    loop {
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-    }
-}
-
-/// generates read and write handles for new connection
-async fn handle_connection(connector: Connector) -> Result<(ReadHandle, WriteHandle)> {
-    let ws_stream = establish_ws_connection(connector).await?;
     let (mut write, mut read) = ws_stream.split();
 
-    let token = CancellationToken::new();
-
-    let cloned_token = token.clone();
-
-    let read_handle = tokio::spawn(async move {
-        while let Some(msg) = read.next().await {
-            match msg {
-                Ok(msg) => {
-                    if msg.is_close() {
-                        token.cancel();
-                        return;
-                    }
-                    println!("Client: Received message: {msg}");
-                }
-                Err(e) => {
-                    eprintln!("Client: Failed to receive message: {e:?}");
-                }
-            }
-        }
-    });
-
-    let mut reader = io::BufReader::new(io::stdin()).lines();
-    let write_handle = tokio::spawn(async move {
-        while let Some(line) = reader.next() {
-            if cloned_token.is_cancelled() {
-                return;
-            }
-
-            match line {
-                Ok(msg) => match write.send(Message::text(msg)).await {
-                    Ok(_) => {
-                        println!("Client: successfully sent a message");
-                    }
-                    Err(e) => {
-                        if e.to_string().contains("Broken pipe") {
+    loop {
+        tokio::select! {
+            Some(cmd) = receiver.recv() => {
+                match cmd {
+                    NetworkCommand::LogIn { username, pswd } => {
+                        let _ = write.feed(Message::Text(Utf8Bytes::from(username))).await;
+                        let _ = write.feed(Message::Text(Utf8Bytes::from(pswd))).await;
+                        let Ok(_res) = write.flush().await else {
+                            let _ = sender.send(NetworkingMessages::FailedToSendAuth).await;
                             break;
-                        }
-                        eprintln!("Client: failed to send a message: {e:?}");
+                        };
                     }
-                },
-                Err(e) => {
-                    eprintln!("Client: failed to read input: {e:?}");
+                };
+            }
+
+            Some(res) = read.next() => {
+                let Ok(res) = res else {
+                    let _ = sender.send(NetworkingMessages::FailedToReceiveMessage).await;
+                    break;
+                };
+
+                match res {
+                    Message::Text(utf8_bytes) => todo!(),
+                    Message::Binary(bytes) => todo!(),
+                    Message::Ping(bytes) => todo!(),
+                    Message::Pong(bytes) => todo!(),
+                    Message::Close(close_frame) => {
+                        let _ = sender.send(NetworkingMessages::FailedToConnect).await;
+                        break;
+                    }
+                    Message::Frame(frame) => todo!(),
                 }
             }
         }
-    });
 
-    Ok((read_handle, write_handle))
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
 }
 
 /// TODO write description
@@ -344,6 +347,8 @@ fn poll_networking_messages(receiver: &mut Receiver<NetworkingMessages>, app: &m
     match receiver.try_recv() {
         Ok(value) => match value {
             NetworkingMessages::FailedToConnect => app.connection = ConnectionStatus::Disconnected,
+            NetworkingMessages::FailedToSendAuth => todo!(),
+            NetworkingMessages::FailedToReceiveMessage => todo!(),
         },
 
         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
