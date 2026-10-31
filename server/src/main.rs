@@ -208,24 +208,25 @@ async fn handle_client(
 ) -> Result<()> {
     let mut client = stream.accept().unwrap();
 
-    let access_token = try_to_restore_session(db, &mut client).await;
+    // let access_token = try_to_restore_session(db, &mut client).await;
 
-    if access_token.is_some() {}
+    // if access_token.is_some() {}
 
-    match auth_client(&db, &mut client).await {
-        Some(username) => {
-            send_msg_to_client(
-                &format!("Successfully logged in as {}", username).to_string(),
-                &mut client,
-            );
-            return client_loop(db, &mut client, &username.as_str()).await;
-        }
-        None => {
-            let _ = client.send_message(&Message::close());
-            let _ = client.shutdown();
-            return Err(anyhow!("Failed to authenticate client"));
-        }
-    };
+    // match auth_client(&db, &mut client).await {
+    //     Some(username) => {
+    //         send_msg_to_client(
+    //             &format!("Successfully logged in as {}", username).to_string(),
+    //             &mut client,
+    //         );
+    //         return client_loop(db, &mut client, &username.as_str()).await;
+    //     }
+    //     None => {
+    //         let _ = client.send_message(&Message::close());
+    //         let _ = client.shutdown();
+    //         return Err(anyhow!("Failed to authenticate client"));
+    //     }
+    // };
+    Ok(())
 }
 
 async fn try_to_restore_session(
